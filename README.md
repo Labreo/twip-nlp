@@ -9,3 +9,9 @@ twip-nlp/
 │   └── orchestrator.py      # The main execution script tying it all together
 ├── requirements.txt         # Project dependencies
 └── README.md                # Documentation for the judges
+
+
+conda create -n twip python=3.10
+conda activate twip
+pip install -r requirements.txt
+python -m spacy download en_core_web_trf
