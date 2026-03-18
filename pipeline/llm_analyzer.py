@@ -70,6 +70,40 @@ class ThreatLLMAnalyzer:
             "sentiment": "unknown",
             "reasoning": "LLM analysis failed or timed out."
         }
+    def detect_trends(self, text: str) -> Dict[str, Any]:
+        """
+        Scans intercepted text for novel slang, zero-day exploits, or 
+        new products not yet in standard threat databases.
+        """
+        trend_prompt = """
+        You are an expert Dark Web Intelligence Analyst. Read the following text and 
+        extract any newly emerging slang, novel attack methods, or unknown illicit products.
+        If nothing new or unusual is found, return empty lists.
+        
+        You MUST respond ONLY with a valid JSON object using this exact schema:
+        {
+            "novel_slang": ["<string>", "<string>"],
+            "new_attack_methods": ["<string>"],
+            "unrecognized_products": ["<string>"]
+        }
+        """
+        
+        prompt = f"{trend_prompt}\n\nAnalyze this text:\n'{text}'"
+        
+        payload = {
+            "model": self.model_name,
+            "prompt": prompt,
+            "stream": False,
+            "format": "json"
+        }
+        
+        try:
+            response = requests.post(self.api_url, json=payload, timeout=30)
+            response.raise_for_status()
+            return json.loads(response.json().get("response", "{}"))
+        except Exception as e:
+            print(f"Trend extraction failed: {e}")
+            return {"novel_slang": [], "new_attack_methods": [], "unrecognized_products": []}
 
 if __name__ == "__main__":
     # Local testing block
