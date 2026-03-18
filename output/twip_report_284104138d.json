@@ -1,0 +1,42 @@
+{
+    "metadata": {
+        "source_url": "http://waycuw2c27ruakfblkf5tcegwmt3ot445dlfoypil6bzmm4yxg7a.b32.i2p/thread/104",
+        "timestamp": "2026-03-18T10:20:54.257228Z",
+        "content_hash": "284104138d74d608ad250646bc6c9e1e76641aadcf81a366542b39ab8c737140",
+        "author": "ShadowBroker"
+    },
+    "threat_classification": {
+        "top_category": "drug_sales",
+        "confidence": 0.3415,
+        "all_scores": {
+            "benign": 0.1874,
+            "csam_references": 0.1152,
+            "drug_sales": 0.3415,
+            "financial_fraud": 0.0805,
+            "hacking_services": 0.1222,
+            "weapons": 0.1533
+        }
+    },
+    "indicators_of_compromise": {
+        "wallets": {
+            "bitcoin": [],
+            "ethereum": [],
+            "monero": []
+        },
+        "entities": []
+    },
+    "intelligence_assessment": {
+        "urgency_score": 5,
+        "imminent_physical_harm_flag": false,
+        "sentiment": "transactional",
+        "reasoning": "The communication is a straightforward request for a drug supply, indicating a non-emergency transactional tone.",
+        "trends": {
+            "novel_slang": [],
+            "new_attack_methods": [],
+            "unrecognized_products": []
+        }
+    },
+    "identity_resolution": {
+        "alias_detected": false
+    }
+}

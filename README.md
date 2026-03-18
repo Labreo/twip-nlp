@@ -35,3 +35,5 @@ Mar 22	The Orchestrator	Build orchestrator.py. Tie the modules together. Have it
 Mar 23	Testing & OpenCTI Prep	
 
 Run dummy data (like the DDIR dataset) through the pipeline. Format the final output so it easily maps to STIX-compliant threat objects for your OpenCTI integration.
+
+Requires ollama3 to be running on local machine.
