@@ -1,0 +1,5 @@
+spacy>=3.7.0
+spacy-huggingface-pipelines
+transformers
+torch
+regex
