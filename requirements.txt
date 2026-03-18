@@ -6,3 +6,4 @@ regex
 classy-classification 
 sentence-transformers
 Flask
+stix2

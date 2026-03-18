@@ -1,6 +1,7 @@
 import os
 import json
 import hashlib
+from stix_mapper import STIXMapper
 from datetime import datetime
 from flask import Flask, request, jsonify
 
@@ -19,6 +20,7 @@ print("Initializing TWIP AI Pipeline... (This may take a minute)")
 extractor = DarkWebExtractor()
 classifier = ThreatClassifier()
 llm_analyzer = ThreatLLMAnalyzer()
+stix_mapper = STIXMapper()
 alias_resolver = AliasResolver()
 
 # In-memory store for deduplication hashes
@@ -89,14 +91,16 @@ def ingest_data():
             "identity_resolution": alias_data
         }
 
-        # --- SAVE TO OUTPUT FOLDER ---
-        filename = f"twip_report_{content_hash[:10]}.json"
+# --- COMPILE & SAVE STIX BUNDLE ---
+        stix_bundle_json = stix_mapper.generate_bundle(enriched_report)
+        
+        filename = f"stix_bundle_{content_hash[:10]}.json"
         filepath = os.path.join(OUTPUT_DIR, filename)
         
         with open(filepath, 'w') as f:
-            json.dump(enriched_report, f, indent=4)
+            f.write(stix_bundle_json)
             
-        print(f"[SUCCESS] Intelligence package generated: {filename}")
+        print(f"[SUCCESS] STIX bundle generated: {filename}")
         return jsonify({"status": "success", "file": filename}), 201
 
     except Exception as e:

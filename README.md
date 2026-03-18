@@ -5,6 +5,7 @@ twip-nlp/
 │   ├── __init__.py
 │   ├── extractor.py         # Regex & standard NER (Day 1)
 │   ├── classifier.py        # Zero-shot threat categorization (Day 2)
+│   ├── stix_mapper.py        # Used to create digestable data for openCTI
 │   ├── alias_resolver.py    # Added for clean separation of alias logic
 │   ├── llm_analyzer.py      # Ollama integration for sentiment/urgency (Day 3)
 │   └── orchestrator.py      # The main execution script tying it all together
