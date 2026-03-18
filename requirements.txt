@@ -3,3 +3,5 @@ spacy-huggingface-pipelines
 transformers
 torch
 regex
+classy-classification 
+sentence-transformers
