@@ -7,3 +7,4 @@ classy-classification
 sentence-transformers
 Flask
 stix2
+pycti

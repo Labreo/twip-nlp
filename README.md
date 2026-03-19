@@ -28,6 +28,7 @@ twip-nlp/
 │   ├── stix_mapper.py       # Converts enriched data into STIX 2.1 bundles
 │   ├── alias_resolver.py    # Cross-forum threat actor linking logic
 │   ├── llm_analyzer.py      # Ollama integration for sentiment/urgency 
+│   ├── opencti_pusher.py    # Automated script to push STIX bundles to OpenCTI
 │   └── orchestrator.py      # The Flask API and main execution script 
 ├── requirements.txt         # Project dependencies
 └── README.md                # Project documentation
@@ -35,7 +36,7 @@ twip-nlp/
 
 ## Prerequisites & Installation
 
-This pipeline requires Python 3.10+ and a local instance of Ollama running a compatible LLM (e.g., Llama 3). 
+This pipeline requires Python 3.10+ and a local instance of Ollama running a compatible LLM (e.g., Llama 3). For OpenCTI integration, a running OpenCTI instance is required.
 
 ### 1. Environment Setup
 It is highly recommended to use Conda to isolate the dependencies. 
@@ -92,6 +93,13 @@ Verify the pipeline's operational metrics via a GET request in your browser or t
 curl http://localhost:5001/status
 ```
 
+### Pushing to OpenCTI
+Once STIX bundles are generated in the `/output` directory, you can push them directly to your local OpenCTI knowledge graph. Ensure your OpenCTI Docker instance is running and your `OPENCTI_TOKEN` is configured in the script.
+
+```bash
+python pipeline/opencti_pusher.py
+```
+
 ## Module Breakdown
 
 * **`extractor.py`**: Handles static pattern matching. Uses comprehensive regex to catch modern crypto wallets (P2PKH, P2SH, Bech32, Monero subaddresses) and secure communication channels.
@@ -99,6 +107,6 @@ curl http://localhost:5001/status
 * **`llm_analyzer.py`**: Interfaces strictly with Ollama's JSON-mode API to guarantee machine-readable sentiment, urgency scoring, and trend detection without hallucination.
 * **`alias_resolver.py`**: An algorithmic matching engine that calculates confidence scores to link separate profiles sharing hard cryptographic identifiers. 
 * **`stix_mapper.py`**: Wraps the final intelligence dictionary into OpenCTI-compatible `Report`, `ThreatActor`, and `Indicator` objects. 
+* **`opencti_pusher.py`**: The delivery mechanism. Uses the `pycti` client to read generated STIX bundles and ingest them directly into the OpenCTI graph database.
 * **`orchestrator.py`**: The central nervous system. It manages model loading, payload deduplication (via SHA-256 hashing), and directs the data flow through the pipeline.
 ```
-
