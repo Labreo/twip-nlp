@@ -1,4 +1,3 @@
-***
 
 ```markdown
 # TWIP: DarkWeb Intelligence Platform - NLP Engine
@@ -36,10 +35,22 @@ twip-nlp/
 
 ## Prerequisites & Installation
 
-This pipeline requires Python 3.10+ and a local instance of Ollama running a compatible LLM (e.g., Llama 3). For OpenCTI integration, a running OpenCTI instance is required.
+This pipeline requires Python 3.10+, a local instance of Ollama running a compatible LLM (e.g., Llama 3), and a running OpenCTI instance.
 
-### 1. Environment Setup
-It is highly recommended to use Conda to isolate the dependencies. 
+### 1. System Dependencies (Crucial)
+The `pycti` library requires the system-level C-library `libmagic` to identify file types. You must install this before installing the Python requirements.
+
+**macOS (Homebrew):**
+```bash
+brew install libmagic
+```
+**Linux (Debian/Ubuntu):**
+```bash
+sudo apt-get install libmagic1
+```
+
+### 2. Environment Setup
+It is highly recommended to use Conda to isolate the Python dependencies. 
 
 ```bash
 conda create -n twip python=3.10
@@ -47,14 +58,14 @@ conda activate twip
 pip install -r requirements.txt
 ```
 
-### 2. Download the Transformer Model
+### 3. Download the Transformer Model
 Pull the highly accurate spaCy transformer model required by the `extractor.py` module:
 
 ```bash
 python -m spacy download en_core_web_trf
 ```
 
-### 3. Start the Local LLM Server
+### 4. Start the Local LLM Server
 The `llm_analyzer.py` module relies on a local Ollama server to process urgency and sentiment without sending sensitive data to the cloud. Open a separate terminal window and run:
 
 ```bash
@@ -94,7 +105,11 @@ curl http://localhost:5001/status
 ```
 
 ### Pushing to OpenCTI
-Once STIX bundles are generated in the `/output` directory, you can push them directly to your local OpenCTI knowledge graph. Ensure your OpenCTI Docker instance is running and your `OPENCTI_TOKEN` is configured in the script.
+Once STIX bundles are generated in the `/output` directory, you can push them directly to your local OpenCTI knowledge graph. 
+
+1. Ensure your OpenCTI Docker instance is running.
+2. Open `pipeline/opencti_pusher.py` and verify that `OPENCTI_URL` and `OPENCTI_TOKEN` match your local OpenCTI configuration (or load them via a `.env` file).
+3. Run the pusher script:
 
 ```bash
 python pipeline/opencti_pusher.py
@@ -106,7 +121,9 @@ python pipeline/opencti_pusher.py
 * **`classifier.py`**: Uses `classy-classification` combined with Hugging Face zero-shot models to semantically map unstructured text to predefined threat dictionaries.
 * **`llm_analyzer.py`**: Interfaces strictly with Ollama's JSON-mode API to guarantee machine-readable sentiment, urgency scoring, and trend detection without hallucination.
 * **`alias_resolver.py`**: An algorithmic matching engine that calculates confidence scores to link separate profiles sharing hard cryptographic identifiers. 
-* **`stix_mapper.py`**: Wraps the final intelligence dictionary into OpenCTI-compatible `Report`, `ThreatActor`, and `Indicator` objects. 
-* **`opencti_pusher.py`**: The delivery mechanism. Uses the `pycti` client to read generated STIX bundles and ingest them directly into the OpenCTI graph database.
+* **`stix_mapper.py`**: Wraps the final intelligence dictionary into OpenCTI-compatible `Report`, `ThreatActor`, and `Indicator` objects, strictly adhering to STIX 2.1 relationship ontology (e.g., `Indicator -> indicates -> ThreatActor`).
+* **`opencti_pusher.py`**: The delivery mechanism. Uses the `pycti` client to read generated STIX bundles, parse them from JSON, and ingest them directly into the OpenCTI graph database.
 * **`orchestrator.py`**: The central nervous system. It manages model loading, payload deduplication (via SHA-256 hashing), and directs the data flow through the pipeline.
 ```
+
+---

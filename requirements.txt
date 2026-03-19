@@ -8,3 +8,4 @@ sentence-transformers
 Flask
 stix2
 pycti
+python-dotenv

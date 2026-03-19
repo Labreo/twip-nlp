@@ -49,11 +49,12 @@ class STIXMapper:
             )
             stix_objects.append(ind)
             indicator_objects.append(ind)
-            # Link the indicator to the actor
+            
+            # --- FIX: Reversed the direction and changed verb to 'indicates' ---
             stix_objects.append(Relationship(
-                source_ref=actor.id,
-                target_ref=ind.id,
-                relationship_type="uses"
+                source_ref=ind.id,          # Source is now the Indicator
+                target_ref=actor.id,        # Target is now the Threat Actor
+                relationship_type="indicates" # Verb updated to standard STIX ontology
             ))
 
         # Map Crypto Wallets
