@@ -1,3 +1,17 @@
+Here is the updated `README.md` with the `.env` configuration, the automated cleanup logic, and the new product vision section added. 
+
+But first, to answer your question: **Yes, absolutely.** Looking at your Phase 1 Proposal document, you have successfully built the core analytical brain of TWIP. 
+
+[cite_start]If we look at your Phase 1 Deliverables (Section 11)[cite: 134, 135]:
+* [cite_start]**D2 (NLP Classification Pipeline):** You have the pipeline running with spaCy, zero-shot classifiers, and Ollama[cite: 135]. 
+* [cite_start]**D3 (Crypto Wallet Flagging):** Your `extractor.py` and `stix_mapper.py` successfully identify and flag wallets[cite: 135]. *(Note: If you haven't plugged in an external Blockchain API to check the wallet history yet, that's a small script you can add later).*
+* [cite_start]**D4 (OpenCTI Integration):** You have successfully mapped the data to STIX 2.1 and automated the push to OpenCTI, generating the relationship graphs[cite: 135].
+
+[cite_start]Excluding the I2P scraping (D1) and the Docker/Legal docs (D5, D6), you have functionally completed the hardest machine-learning and data-engineering requirements of this project[cite: 135]. You are in a great spot.
+
+Here is your updated README:
+
+***
 
 ```markdown
 # TWIP: DarkWeb Intelligence Platform - NLP Engine
@@ -20,6 +34,7 @@ The pipeline operates as a lightweight Flask webhook API. It receives scraped fo
 twip-nlp/
 ├── input/                   # The crawler drops its raw JSON files here
 ├── output/                  # The pipeline pushes enriched STIX-ready JSON here
+│   └── ingested/            # Successfully pushed STIX bundles are archived here
 ├── pipeline/                # The core logic modules
 │   ├── __init__.py
 │   ├── extractor.py         # Regex & standard NER 
@@ -29,6 +44,8 @@ twip-nlp/
 │   ├── llm_analyzer.py      # Ollama integration for sentiment/urgency 
 │   ├── opencti_pusher.py    # Automated script to push STIX bundles to OpenCTI
 │   └── orchestrator.py      # The Flask API and main execution script 
+├── .env.sample             # Project environment sample
+├── mock_crawler.py          # Built for testing purposes
 ├── requirements.txt         # Project dependencies
 └── README.md                # Project documentation
 ```
@@ -108,12 +125,16 @@ curl http://localhost:5001/status
 Once STIX bundles are generated in the `/output` directory, you can push them directly to your local OpenCTI knowledge graph. 
 
 1. Ensure your OpenCTI Docker instance is running.
-2. Open `pipeline/opencti_pusher.py` and verify that `OPENCTI_URL` and `OPENCTI_TOKEN` match your local OpenCTI configuration (or load them via a `.env` file).
+2. Create a `.env` file in the root directory (`twip-nlp/.env`) and add your OpenCTI credentials:
+   ```env
+   OPENCTI_URL="http://localhost:8080"
+   OPENCTI_TOKEN="your-uuid-token-here"
+   ```
 3. Run the pusher script:
-
-```bash
-python pipeline/opencti_pusher.py
-```
+   ```bash
+   python pipeline/opencti_pusher.py
+   ```
+*Note: Successfully ingested JSON files are automatically moved to `/output/ingested/` to prevent duplicate uploads during subsequent runs.*
 
 ## Module Breakdown
 
@@ -122,8 +143,16 @@ python pipeline/opencti_pusher.py
 * **`llm_analyzer.py`**: Interfaces strictly with Ollama's JSON-mode API to guarantee machine-readable sentiment, urgency scoring, and trend detection without hallucination.
 * **`alias_resolver.py`**: An algorithmic matching engine that calculates confidence scores to link separate profiles sharing hard cryptographic identifiers. 
 * **`stix_mapper.py`**: Wraps the final intelligence dictionary into OpenCTI-compatible `Report`, `ThreatActor`, and `Indicator` objects, strictly adhering to STIX 2.1 relationship ontology (e.g., `Indicator -> indicates -> ThreatActor`).
-* **`opencti_pusher.py`**: The delivery mechanism. Uses the `pycti` client to read generated STIX bundles, parse them from JSON, and ingest them directly into the OpenCTI graph database.
+* **`opencti_pusher.py`**: The delivery mechanism. Uses the `pycti` client to read generated STIX bundles, parse them from JSON, and ingest them directly into the OpenCTI graph database. Safely archives files post-ingestion.
 * **`orchestrator.py`**: The central nervous system. It manages model loading, payload deduplication (via SHA-256 hashing), and directs the data flow through the pipeline.
+
+## Product Vision & Hackathon Roadmap
+Beyond the core extraction and mapping pipeline, TWIP aims to implement several advanced capabilities to provide immediate value to Law Enforcement Agencies (LEAs):
+
+* **The Alias Matrix (Cross-Forum De-anonymization):** Leveraging OpenCTI's graph visualization to algorithmically link distinct threat actor aliases across disconnected I2P forums based on shared digital exhaust (PGP keys, Tox IDs, wallet reuse).
+* **Zero-Day / Emerging Threat Early Warning Bot:** A real-time webhook integration that monitors the OpenCTI data stream. If a generated STIX `Report` exceeds a high urgency threshold (scored by the LLM) and contains a `Vulnerability` (CVE), it automatically triggers an alert to an LEA Slack or Discord channel.
+* **Sector-Based Risk Heatmap:** A visual dashboard (Streamlit/Plotly) that aggregates extracted `Location` and `Target Sector` data to show where Dark Web threat actors are currently focusing their operational planning (e.g., Finance vs. Healthcare).
 ```
 
----
+***
+

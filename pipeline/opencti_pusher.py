@@ -1,15 +1,17 @@
 import os
 import glob
+import shutil  # <-- Added for safe file moving
+import json
 from dotenv import load_dotenv
-import json  # <-- Added this import
 from pycti import OpenCTIApiClient
 
 # --- Configuration ---
-# Use the exact URL and Token from your OpenCTI .env setup
+# FIX: You have to actually call load_dotenv() to read the .env file!
+load_dotenv()
 
 opencti_url = os.getenv("OPENCTI_URL")
-  # Replace with the UUID you generated
 opencti_token = os.getenv("OPENCTI_TOKEN")
+
 def push_stix_bundles():
     print("Connecting to OpenCTI...")
     try:
@@ -24,6 +26,10 @@ def push_stix_bundles():
     
     # 2. Go up one level (..) and into the 'output' folder
     output_dir = os.path.abspath(os.path.join(current_script_dir, '..', 'output'))
+    
+    # --- NEW: Create the 'ingested' directory if it doesn't exist ---
+    ingested_dir = os.path.join(output_dir, 'ingested')
+    os.makedirs(ingested_dir, exist_ok=True)
 
     bundle_files = glob.glob(os.path.join(output_dir, 'stix_bundle_*.json'))
 
@@ -38,12 +44,15 @@ def push_stix_bundles():
         print(f"Pushing {filename}...")
         try:
             with open(file_path, 'r') as f:
-                # <-- FIX: Parse the JSON string into a Python dictionary
                 stix_data = json.load(f) 
                 
             # Upload the parsed dictionary to OpenCTI
             api_client.stix2.import_bundle(stix_data)
             print(f"  -> Success: {filename}")
+            
+            # --- NEW: Move the file to the 'ingested' folder ---
+            shutil.move(file_path, os.path.join(ingested_dir, filename))
+            print(f"  -> Moved {filename} to archive.")
             
         except Exception as e:
             print(f"  -> Error pushing {filename}: {e}")
