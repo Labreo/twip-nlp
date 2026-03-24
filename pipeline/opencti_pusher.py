@@ -2,6 +2,7 @@ import os
 import glob
 import shutil  # <-- Added for safe file moving
 import json
+import time
 from dotenv import load_dotenv
 from pycti import OpenCTIApiClient
 
@@ -11,7 +12,8 @@ load_dotenv()
 
 opencti_url = os.getenv("OPENCTI_URL")
 opencti_token = os.getenv("OPENCTI_TOKEN")
-
+if not opencti_url or not opencti_token:
+    raise ValueError("OPENCTI_URL and OPENCTI_TOKEN must be set in .env")
 def push_stix_bundles():
     print("Connecting to OpenCTI...")
     try:
@@ -58,4 +60,7 @@ def push_stix_bundles():
             print(f"  -> Error pushing {filename}: {e}")
 
 if __name__ == "__main__":
-    push_stix_bundles()
+    print("Watching for new STIX bundles... (Ctrl+C to stop)")
+    while True:
+        push_stix_bundles()
+        time.sleep(10)  # check every 10 seconds

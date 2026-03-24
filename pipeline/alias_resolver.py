@@ -51,6 +51,7 @@ class AliasResolver:
     def process_and_link(self, username: str, extracted_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Ingests a new profile, checks for aliases, and updates the registry.
+        Returns a dictionary formatted for the STIX Mapper.
         """
         best_match = None
         highest_score = 0.0
@@ -68,14 +69,21 @@ class AliasResolver:
         # Register the new data
         self.known_actors[username] = extracted_data
         
-        # Return resolution results
+        # Return resolution results mapped for STIX
         if highest_score >= 0.6: # Threshold for an alias match
             return {
                 "alias_detected": True,
-                "linked_account": best_match,
+                "primary_actor": best_match,
+                "aliases": [username], # The newly scraped name is marked as an alias
                 "confidence_score": highest_score
             }
-        return {"alias_detected": False}
+            
+        return {
+            "alias_detected": False,
+            "primary_actor": username,
+            "aliases": [],
+            "confidence_score": 0.0
+        }
 
 if __name__ == "__main__":
     # Local testing block
@@ -86,7 +94,8 @@ if __name__ == "__main__":
         "communications": {"tox_id": ["42E9CA1A838AB6CA8E825A7C48B90BAFE1E22B9FA467A7AD4BA2821F1344803BD71BCB00A535"]},
         "wallets": {"bitcoin": ["bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"]}
     }
-    resolver.process_and_link("DarkVendor99", actor_1_data)
+    # Register the first one (should have no aliases yet)
+    print("Run 1:", resolver.process_and_link("DarkVendor99", actor_1_data))
     
     # Profile 2: Extracted from Forum B
     actor_2_data = {
@@ -94,9 +103,5 @@ if __name__ == "__main__":
         "wallets": {"monero": ["44AFFq5kSiGBoZ4NMDwYt..."]}
     }
     
-    print("Alias Resolution Results:\n" + "="*30)
-    result = resolver.process_and_link("ShadowBroker", actor_2_data)
-    
-    if result["alias_detected"]:
-        print(f"ALERT: 'ShadowBroker' is highly likely an alias for '{result['linked_account']}'!")
-        print(f"Match Confidence: {result['confidence_score'] * 100}%")
+    # Register the second one (should flag as an alias of DarkVendor99)
+    print("Run 2:", resolver.process_and_link("ShadowBroker", actor_2_data))

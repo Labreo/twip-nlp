@@ -26,7 +26,6 @@ alias_resolver = AliasResolver()
 # In-memory store for deduplication hashes
 seen_hashes = set()
 
-# Ensure output directory exists
 # Ensure output directory exists in the root of twip-nlp
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_DIR = os.path.join(BASE_DIR, 'output')
@@ -41,7 +40,7 @@ def generate_content_hash(text: str) -> str:
 
 @app.route('/ingest', methods=['POST'])
 def ingest_data():
-    """Webhook endpoint for the ACHE crawler to push scraped data."""
+    """Webhook endpoint for the crawler to push scraped data."""
     try:
         data = request.get_json()
         if not data or 'content' not in data:
@@ -74,7 +73,7 @@ def ingest_data():
         # 4. Resolve Aliases (Cross-Forum Linking)
         alias_data = alias_resolver.process_and_link(author, extracted_data)
 
-        # --- COMPILE STIX-READY OUTPUT ---
+        # --- COMPILE ENRICHED REPORT ---
         enriched_report = {
             "metadata": {
                 "source_url": url,
@@ -88,10 +87,10 @@ def ingest_data():
                 **llm_assessment,
                 "trends": trends
             },
-            "identity_resolution": alias_data
+            "alias_resolution": alias_data # FIX: Key updated to match STIXMapper exactly
         }
 
-# --- COMPILE & SAVE STIX BUNDLE ---
+        # --- COMPILE & SAVE STIX BUNDLE ---
         stix_bundle_json = stix_mapper.generate_bundle(enriched_report)
         
         filename = f"stix_bundle_{content_hash[:10]}.json"

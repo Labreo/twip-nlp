@@ -1,76 +1,58 @@
+import json
 import requests
 import time
-import json
+import os
 
-# The endpoint of your running Orchestrator
-API_URL = "http://localhost:5001/ingest"
+# Configuration
+ENDPOINT = "http://localhost:5001/ingest"
+FILE_PATH = os.path.join("input", "all_posts.json")
 
-# Simulated I2P dark web posts
-MOCK_PAYLOADS = [
-    {
-        "url": "http://waycuw2c27ruakfblkf5tcegwmt3ot445dlfoypil6bzmm4yxg7a.b32.i2p/thread/101",
-        "author": "ShadowBroker",
-        "content": "Need a reliable supplier for 100g of pure coke. Escrow only. BTC: bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
-    },
-    {
-        "url": "http://hx35bdx7...[snip]...2d.onion/forum/post/442",
-        "author": "IronSight",
-        "content": "Looking for untraceable ARs. Need it shipped overnight to Chicago, planning something for the rally on Friday."
-    },
-    {
-        "url": "http://waycuw2c27ruakfblkf5tcegwmt3ot445dlfoypil6bzmm4yxg7a.b32.i2p/thread/205",
-        "author": "CarderKing",
-        "content": "Selling Chase bank logs with email access. $500 balance minimum. Hit me on Tox: 42E9CA1A838AB6CA8E825A7C48B90BAFE1E22B9FA467A7AD4BA2821F1344803BD71BCB00A535"
-    },
-    {
-        # DEDUPLICATION TEST: Exact same content as ShadowBroker's post, but found on a different URL.
-        "url": "http://mirror2.waycuw2c27ruakfblkf5tcegwmt3ot445dlfoypil6bzmm4yxg7a.b32.i2p/thread/101",
-        "author": "ShadowBroker",
-        "content": "Need a reliable supplier for 100g of pure coke. Escrow only. BTC: bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
-    },
-    {
-        # ALIAS RESOLUTION TEST: Different author, but shares the same Tox ID as CarderKing.
-        "url": "http://anotherforum.b32.i2p/market/view/88",
-        "author": "GhostVendor99",
-        "content": "Fresh fullz available. High credit score. Contact me on Tox: 42E9CA1A838AB6CA8E825A7C48B90BAFE1E22B9FA467A7AD4BA2821F1344803BD71BCB00A535"
-    },
-    {
-        "url": "http://friendlyforum.b32.i2p/help/1",
-        "author": "NewbieUser",
-        "content": "Can anyone recommend a good VPN for routing through Tor? I am trying to set up my router."
-    }
-]
+def push_mock_data():
+    if not os.path.exists(FILE_PATH):
+        print(f"[!] Error: Could not find '{FILE_PATH}'. Ensure it is in the /input folder.")
+        return
 
-def run_simulation():
-    print("Starting TWIP Mock Crawler Simulation...\n")
+    # Load the JSON file
+    with open(FILE_PATH, 'r') as f:
+        try:
+            posts = json.load(f)
+        except json.JSONDecodeError:
+            print("[!] Error: all_posts.json is not valid JSON.")
+            return
+
+    # If the JSON is just a single dictionary, wrap it in a list so we can loop it
+    if isinstance(posts, dict):
+        # If your JSON is wrapped in a parent key like {"data": [...]}, adjust this:
+        posts = posts.get("data", [posts]) 
+
+    print(f"Found {len(posts)} posts. Beginning ingestion pipeline test...\n")
     
-    for i, payload in enumerate(MOCK_PAYLOADS, 1):
-        print(f"[*] Crawler found post {i}/{len(MOCK_PAYLOADS)} from author '{payload['author']}'. Sending to pipeline...")
+    # Loop through and send each post to the Flask webhook
+    for i, post in enumerate(posts, 1):
+        author = post.get('author', 'Unknown')
+        print(f"[{i}/{len(posts)}] Pushing post by '{author}'...")
         
         try:
-            response = requests.post(
-                API_URL, 
-                json=payload,
-                headers={"Content-Type": "application/json"}
-            )
+            response = requests.post(ENDPOINT, json=post)
             
             if response.status_code in [200, 201]:
-                result = response.json()
-                if result.get("status") == "skipped":
-                    print("  -> Pipeline response: DEDUPLICATED (Hash already seen).")
+                data = response.json()
+                if data.get("status") == "skipped":
+                    print(f"  -> Skipped (Duplicate Hash)")
                 else:
-                    print(f"  -> Pipeline response: SUCCESS. Saved as {result.get('file')}")
+                    print(f"  -> Success: {data.get('file')}")
             else:
-                print(f"  -> Pipeline error: {response.status_code} - {response.text}")
+                print(f"  -> Failed (HTTP {response.status_code}): {response.text}")
                 
         except requests.exceptions.ConnectionError:
-            print("  -> ERROR: Could not connect to the Orchestrator. Is it running on port 5001?")
+            print("\n[FATAL] Connection refused. Is orchestrator.py running on port 5001?")
             break
             
-        # Pause briefly to simulate network travel time and let the LLM breathe
-        time.sleep(2)
+        # 1-second delay so we don't overwhelm your local Mac's CPU/RAM 
+        # while Ollama, spaCy, and OpenCTI are all running at once.
+        time.sleep(1)
 
-    print("\nSimulation complete. Check the Orchestrator terminal for deep logs and the /output folder for STIX bundles.")
+    print("\n[+] Mock ingestion complete.")
 
 if __name__ == "__main__":
-    run_simulation()
+    push_mock_data()

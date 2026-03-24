@@ -24,12 +24,24 @@ class STIXMapper:
         iocs = enriched_data.get("indicators_of_compromise", {})
         classification = enriched_data.get("threat_classification", {})
         
+        # Base scraped name
         author_name = metadata.get("author", "Unknown Actor")
         source_url = metadata.get("source_url", "Unknown URL")
 
+        # --- NEW: Extract Alias Resolution Data ---
+        alias_data = enriched_data.get("alias_resolution", {})
+        is_alias = alias_data.get("alias_detected", False)
+        primary_actor_name = alias_data.get("primary_actor", author_name)
+        known_aliases = alias_data.get("aliases", [])
+
+        # Ensure the current scraped name is added to the alias list if it differs from the primary
+        if is_alias and author_name not in known_aliases and author_name != primary_actor_name:
+            known_aliases.append(author_name)
+
         # 1. Create the Threat Actor
         actor = ThreatActor(
-            name=author_name,
+            name=primary_actor_name, # Group under the master name
+            aliases=known_aliases,   # Inject all known alter-egos for OpenCTI
             threat_actor_types=["criminal-enterprise" if classification.get("top_category") != "benign" else "unknown"],
             description=f"Automated extraction from I2P hidden service: {source_url}"
         )
@@ -50,11 +62,11 @@ class STIXMapper:
             stix_objects.append(ind)
             indicator_objects.append(ind)
             
-            # --- FIX: Reversed the direction and changed verb to 'indicates' ---
+            # STIX 2.1 Standard: Indicator -> indicates -> Threat Actor
             stix_objects.append(Relationship(
-                source_ref=ind.id,          # Source is now the Indicator
-                target_ref=actor.id,        # Target is now the Threat Actor
-                relationship_type="indicates" # Verb updated to standard STIX ontology
+                source_ref=ind.id,
+                target_ref=actor.id,
+                relationship_type="indicates" 
             ))
 
         # Map Crypto Wallets
@@ -62,7 +74,7 @@ class STIXMapper:
             for addr in addresses:
                 _create_indicator(
                     pattern=f"[cryptocurrency:wallet_address = '{addr}']",
-                    indicator_type="compromised-infrastructure", # Close enough STIX mapping
+                    indicator_type="compromised-infrastructure",
                     desc=f"{currency.capitalize()} Wallet Address"
                 )
                 
@@ -93,7 +105,7 @@ class STIXMapper:
         return bundle.serialize(indent=4)
 
 if __name__ == "__main__":
-    # Local DDIR-style dummy payload test
+    # Local testing to ensure Aliases are mapped to STIX JSON correctly
     dummy_payload = {
         "metadata": {
             "source_url": "http://waycuw2c27ruakfblkf5tcegwmt3ot445dlfoypil6bzmm4yxg7a.b32.i2p/thread/104",
@@ -105,7 +117,15 @@ if __name__ == "__main__":
             "wallets": {"bitcoin": ["bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"]},
             "communications": {"tox_id": ["42E9CA1A838AB6CA8E825A7C48B90BAFE1E22B9FA467A7AD4BA2821F1344803BD71BCB00A535"]}
         },
-        "intelligence_assessment": {"urgency_score": 7}
+        "intelligence_assessment": {"urgency_score": 7},
+        
+        # Simulate data injected by AliasResolver
+        "alias_resolution": {
+            "alias_detected": True,
+            "primary_actor": "DarkVendor99",
+            "aliases": ["ShadowBroker"],
+            "confidence_score": 0.7
+        }
     }
     
     mapper = STIXMapper()

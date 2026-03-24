@@ -32,7 +32,7 @@ twip-nlp/
 │   ├── opencti_pusher.py    # Automated script to push STIX bundles to OpenCTI
 │   └── orchestrator.py      # The Flask API and main execution script 
 ├── .env.sample              # Project environment sample
-├── mock_crawler.py          # Built for testing purposes 
+├── mock_crawler.py          # Built for end-to-end pipeline testing 
 ├── requirements.txt         # Project dependencies
 └── README.md                # Project documentation
 ```
@@ -133,8 +133,17 @@ python pipeline/orchestrator.py
 
 ### Interacting with the API
 
-**Ingest Data:**
-The crawling engine pushes data to the `/ingest` endpoint via a POST request.
+**1. Automated Batch Ingestion (End-to-End Test):**
+To simulate a live data feed from I2P forums, you can use the included mock crawler. Ensure your mock dataset is saved at `input/all_posts.json` and run:
+
+```bash
+conda activate twip
+python mock_crawler.py
+```
+*This script loops through the JSON array, posts each entry to the webhook at a safe interval, and generates corresponding STIX 2.1 bundles in the `/output` directory.*
+
+**2. Manual Ingestion (Single Post):**
+You can also push data to the `/ingest` endpoint manually via a `POST` request.
 
 ```bash
 curl -X POST http://localhost:5001/ingest \
@@ -145,7 +154,6 @@ curl -X POST http://localhost:5001/ingest \
     "content": "Need a reliable supplier for 100g of pure coke. Escrow only. Hit me on tox: 42E9CA1A838AB6CA8E825A7C48B90BAFE1E22B9FA467A7AD4BA2821F1344803BD71BCB00A535"
 }'
 ```
-*Successful ingestion will output a STIX 2.1 `.json` bundle into the `/output` directory.*
 
 **Check Status:**
 Verify the pipeline's operational metrics via a GET request in your browser or terminal.
