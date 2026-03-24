@@ -9,3 +9,4 @@ Flask
 stix2
 pycti
 python-dotenv
+streamlit
