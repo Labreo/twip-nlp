@@ -1,16 +1,3 @@
-Here is the updated `README.md` with the `.env` configuration, the automated cleanup logic, and the new product vision section added. 
-
-But first, to answer your question: **Yes, absolutely.** Looking at your Phase 1 Proposal document, you have successfully built the core analytical brain of TWIP. 
-
-[cite_start]If we look at your Phase 1 Deliverables (Section 11)[cite: 134, 135]:
-* [cite_start]**D2 (NLP Classification Pipeline):** You have the pipeline running with spaCy, zero-shot classifiers, and Ollama[cite: 135]. 
-* [cite_start]**D3 (Crypto Wallet Flagging):** Your `extractor.py` and `stix_mapper.py` successfully identify and flag wallets[cite: 135]. *(Note: If you haven't plugged in an external Blockchain API to check the wallet history yet, that's a small script you can add later).*
-* [cite_start]**D4 (OpenCTI Integration):** You have successfully mapped the data to STIX 2.1 and automated the push to OpenCTI, generating the relationship graphs[cite: 135].
-
-[cite_start]Excluding the I2P scraping (D1) and the Docker/Legal docs (D5, D6), you have functionally completed the hardest machine-learning and data-engineering requirements of this project[cite: 135]. You are in a great spot.
-
-Here is your updated README:
-
 ***
 
 ```markdown
@@ -44,15 +31,17 @@ twip-nlp/
 │   ├── llm_analyzer.py      # Ollama integration for sentiment/urgency 
 │   ├── opencti_pusher.py    # Automated script to push STIX bundles to OpenCTI
 │   └── orchestrator.py      # The Flask API and main execution script 
-├── .env.sample             # Project environment sample
-├── mock_crawler.py          # Built for testing purposes
+├── .env.sample              # Project environment sample
+├── mock_crawler.py          # Built for testing purposes 
 ├── requirements.txt         # Project dependencies
 └── README.md                # Project documentation
 ```
 
 ## Prerequisites & Installation
 
-This pipeline requires Python 3.10+, a local instance of Ollama running a compatible LLM (e.g., Llama 3), and a running OpenCTI instance.
+This pipeline requires Python 3.10+, a local instance of Ollama running a compatible LLM (e.g., Llama 3), and a locally running OpenCTI instance. 
+
+**Important:** OpenCTI requires significant resources. Open Docker Desktop settings, navigate to Resources, and ensure Docker is allocated at least **8GB to 12GB of Memory**. Starving Docker of RAM will cause the underlying databases (Elasticsearch/RabbitMQ) to crash during initialization.
 
 ### 1. System Dependencies (Crucial)
 The `pycti` library requires the system-level C-library `libmagic` to identify file types. You must install this before installing the Python requirements.
@@ -90,6 +79,49 @@ ollama run llama3
 ```
 *(Leave this terminal open and running in the background).*
 
+### 5. Start the OpenCTI Graph Database
+TWIP pushes intelligence directly into an OpenCTI instance. You must deploy OpenCTI via Docker before pushing STIX bundles. Open a new terminal and run the following:
+
+**A. Clone the repository:**
+```bash
+git clone [https://github.com/OpenCTI-Platform/docker.git](https://github.com/OpenCTI-Platform/docker.git) opencti-docker
+cd opencti-docker
+```
+
+**B. Generate the `.env` configuration:**
+Use this command to instantly generate secure UUIDs and configuration parameters:
+```bash
+cat << EOF > .env
+OPENCTI_ADMIN_EMAIL=admin@twip.local
+OPENCTI_ADMIN_PASSWORD=HackathonWinner2026!
+OPENCTI_ADMIN_TOKEN=$(uuidgen | tr '[:upper:]' '[:lower:]')
+OPENCTI_BASE_URL=http://localhost:8080
+MINIO_ROOT_USER=$(uuidgen | tr '[:upper:]' '[:lower:]')
+MINIO_ROOT_PASSWORD=$(uuidgen | tr '[:upper:]' '[:lower:]')
+RABBITMQ_DEFAULT_USER=guest
+RABBITMQ_DEFAULT_PASS=guest
+CONNECTOR_HISTORY_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+CONNECTOR_EXPORT_FILE_STIX_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+CONNECTOR_EXPORT_FILE_CSV_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+CONNECTOR_EXPORT_FILE_TXT_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+CONNECTOR_IMPORT_FILE_STIX_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+CONNECTOR_IMPORT_DOCUMENT_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+SMTP_HOSTNAME=localhost
+ELASTIC_MEMORY_SIZE=4G
+EOF
+```
+*Run `grep OPENCTI_ADMIN_TOKEN .env` to retrieve the generated UUID. You will need this for the NLP pusher script.*
+
+**C. Apple Silicon (M-Series) Fix:**
+If running on an Apple Silicon Mac, edit the `docker-compose.yml` file and add `platform: linux/amd64` to all connector services (e.g., `connector-export-file-stix`, `connector-import-document`, `xtm-composer`) to force Rosetta 2 emulation.
+
+**D. Boot the Core Stack:**
+To save memory and avoid timeout errors on heavy connectors, boot only the core databases and the main platform:
+```bash
+docker compose up -d rsa-key-generator redis elasticsearch minio rabbitmq xtm-composer opencti worker
+```
+Wait 2-3 minutes for initialization, then access the dashboard at `http://localhost:8080`.
+
 ## Running the Pipeline
 
 Start the Orchestrator, which initializes the machine learning models into memory and starts the Flask webhook listener on port `5001`.
@@ -125,7 +157,7 @@ curl http://localhost:5001/status
 Once STIX bundles are generated in the `/output` directory, you can push them directly to your local OpenCTI knowledge graph. 
 
 1. Ensure your OpenCTI Docker instance is running.
-2. Create a `.env` file in the root directory (`twip-nlp/.env`) and add your OpenCTI credentials:
+2. Create a `.env` file in the root directory (`twip-nlp/.env`) and add your OpenCTI credentials (using the token extracted during setup):
    ```env
    OPENCTI_URL="http://localhost:8080"
    OPENCTI_TOKEN="your-uuid-token-here"
@@ -153,6 +185,3 @@ Beyond the core extraction and mapping pipeline, TWIP aims to implement several 
 * **Zero-Day / Emerging Threat Early Warning Bot:** A real-time webhook integration that monitors the OpenCTI data stream. If a generated STIX `Report` exceeds a high urgency threshold (scored by the LLM) and contains a `Vulnerability` (CVE), it automatically triggers an alert to an LEA Slack or Discord channel.
 * **Sector-Based Risk Heatmap:** A visual dashboard (Streamlit/Plotly) that aggregates extracted `Location` and `Target Sector` data to show where Dark Web threat actors are currently focusing their operational planning (e.g., Finance vs. Healthcare).
 ```
-
-***
-
