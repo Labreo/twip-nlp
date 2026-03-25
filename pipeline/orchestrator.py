@@ -1,15 +1,22 @@
 import os
 import json
 import hashlib
-from stix_mapper import STIXMapper
+import time
+import requests
 from datetime import datetime
 from flask import Flask, request, jsonify
+from dotenv import load_dotenv
 
+from stix_mapper import STIXMapper
 # Import your custom modules
 from extractor import DarkWebExtractor
 from classifier import ThreatClassifier
 from llm_analyzer import ThreatLLMAnalyzer
 from alias_resolver import AliasResolver
+
+# Load environment variables for the Slack Webhook
+load_dotenv()
+SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 
 app = Flask(__name__)
 
@@ -30,6 +37,46 @@ seen_hashes = set()
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_DIR = os.path.join(BASE_DIR, 'output')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# ==========================================
+# SLACK ALERT LOGIC
+# ==========================================
+def send_slack_alert(author: str, urgency: int, category: str, content: str, wallets: list):
+    """Sends a high-priority, formatted alert to Slack."""
+    if not SLACK_WEBHOOK_URL:
+        print("[-] Skipping Slack Alert: No Webhook URL configured.")
+        return
+
+    wallet_str = "\n".join(wallets) if wallets else "None detected."
+    color = "#FF0000" if urgency >= 9 else "#FFA500" # Red for critical, Orange for high
+    
+    # Safely generate markdown code blocks for Slack without breaking the parser
+    ticks = chr(96) * 3
+    formatted_wallets = f"{ticks}\n{wallet_str}\n{ticks}"
+    
+    payload = {
+        "attachments": [
+            {
+                "fallback": f"HIGH URGENCY THREAT: [{urgency}/10] {category}",
+                "color": color,
+                "title": f"🚨 HIGH URGENCY THREAT DETECTED: [{urgency}/10]",
+                "text": f"*{category}* threat detected by TWIP Pipeline.",
+                "fields": [
+                    {"title": "Actor/Alias", "value": author, "short": True},
+                    {"title": "Threat Category", "value": category, "short": True},
+                    {"title": "Intercepted Comm", "value": f"> {content[:200]}...", "short": False},
+                    {"title": "Extracted Wallets", "value": formatted_wallets, "short": False}
+                ],
+                "footer": "TWIP Automated OSINT Pipeline • Pushed to OpenCTI",
+                "ts": int(time.time())
+            }
+        ]
+    }
+    try:
+        requests.post(SLACK_WEBHOOK_URL, json=payload, timeout=3)
+        print("[+] Slack Alert Fired Successfully.")
+    except Exception as e:
+        print(f"[-] Failed to fire Slack alert: {e}")
 
 # ==========================================
 # 2. The Core Processing Logic
@@ -72,6 +119,14 @@ def ingest_data():
         
         # 4. Resolve Aliases (Cross-Forum Linking)
         alias_data = alias_resolver.process_and_link(author, extracted_data)
+
+        # --- NEW: TRIGGER SLACK ALERT IF URGENT ---
+        urgency_score = llm_assessment.get("urgency_score", 0)
+        if urgency_score >= 8:
+            all_wallets = []
+            for currency, addrs in extracted_data.get("wallets", {}).items():
+                all_wallets.extend(addrs)
+            send_slack_alert(author, urgency_score, classification.get("top_category", "Unknown"), content, all_wallets)
 
         # --- COMPILE ENRICHED REPORT ---
         enriched_report = {
