@@ -50,7 +50,7 @@ def push_mock_data():
             
         # 1-second delay so we don't overwhelm your local Mac's CPU/RAM 
         # while Ollama, spaCy, and OpenCTI are all running at once.
-        time.sleep(1)
+        time.sleep(5)
 
     print("\n[+] Mock ingestion complete.")
 

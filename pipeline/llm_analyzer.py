@@ -43,7 +43,7 @@ class ThreatLLMAnalyzer:
         }
         
         try:
-            response = requests.post(self.api_url, json=payload, timeout=30)
+            response = requests.post(self.api_url, json=payload, timeout=120)
             response.raise_for_status()
             
             # Extract the response text
@@ -98,7 +98,7 @@ class ThreatLLMAnalyzer:
         }
         
         try:
-            response = requests.post(self.api_url, json=payload, timeout=30)
+            response = requests.post(self.api_url, json=payload, timeout=120)
             response.raise_for_status()
             return json.loads(response.json().get("response", "{}"))
         except Exception as e:

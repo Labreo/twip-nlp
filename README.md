@@ -1,4 +1,3 @@
-***
 
 ```markdown
 # TWIP: DarkWeb Intelligence Platform - NLP Engine
@@ -37,11 +36,11 @@ twip-nlp/
 └── README.md                # Project documentation
 ```
 
-## Prerequisites & Installation
+---
 
-This pipeline requires Python 3.10+, a local instance of Ollama running a compatible LLM (e.g., Llama 3), and a locally running OpenCTI instance. 
+## Part 1: Prerequisites & Setup
 
-**Important:** OpenCTI requires significant resources. Open Docker Desktop settings, navigate to Resources, and ensure Docker is allocated at least **8GB to 12GB of Memory**. Starving Docker of RAM will cause the underlying databases (Elasticsearch/RabbitMQ) to crash during initialization.
+This pipeline requires Python 3.10+, a local instance of Ollama running a compatible LLM (e.g., Llama 3), and a locally running OpenCTI instance via Docker. 
 
 ### 1. System Dependencies (Crucial)
 The `pycti` library requires the system-level C-library `libmagic` to identify file types. You must install this before installing the Python requirements.
@@ -55,7 +54,7 @@ brew install libmagic
 sudo apt-get install libmagic1
 ```
 
-### 2. Environment Setup
+### 2. Python Environment Setup
 It is highly recommended to use Conda to isolate the Python dependencies. 
 
 ```bash
@@ -64,23 +63,19 @@ conda activate twip
 pip install -r requirements.txt
 ```
 
-### 3. Download the Transformer Model
+### 3. Download the NLP Models
 Pull the highly accurate spaCy transformer model required by the `extractor.py` module:
 
 ```bash
 python -m spacy download en_core_web_trf
 ```
-
-### 4. Start the Local LLM Server
-The `llm_analyzer.py` module relies on a local Ollama server to process urgency and sentiment without sending sensitive data to the cloud. Open a separate terminal window and run:
-
+Ensure you also have Ollama installed on your system and download the Llama 3 model:
 ```bash
-ollama run llama3
+ollama pull llama3
 ```
-*(Leave this terminal open and running in the background).*
 
-### 5. Start the OpenCTI Graph Database
-TWIP pushes intelligence directly into an OpenCTI instance. You must deploy OpenCTI via Docker before pushing STIX bundles. Open a new terminal and run the following:
+### 4. OpenCTI Docker Setup & Configuration
+TWIP pushes intelligence directly into an OpenCTI instance. **Important:** Open Docker Desktop settings, navigate to Resources, and ensure Docker is allocated at least **8GB to 12GB of Memory**.
 
 **A. Clone the repository:**
 ```bash
@@ -89,7 +84,7 @@ cd opencti-docker
 ```
 
 **B. Generate the `.env` configuration:**
-Use this command to instantly generate secure UUIDs and configuration parameters:
+Run this command inside the `opencti-docker` folder to instantly generate secure UUIDs and configuration parameters:
 ```bash
 cat << EOF > .env
 OPENCTI_ADMIN_EMAIL=admin@twip.local
@@ -110,41 +105,68 @@ SMTP_HOSTNAME=localhost
 ELASTIC_MEMORY_SIZE=4G
 EOF
 ```
-*Run `grep OPENCTI_ADMIN_TOKEN .env` to retrieve the generated UUID. You will need this for the NLP pusher script.*
+*Run `grep OPENCTI_ADMIN_TOKEN .env` to retrieve the generated UUID. You will need this for the TWIP `.env` file.*
 
 **C. Apple Silicon (M-Series) Fix:**
 If running on an Apple Silicon Mac, edit the `docker-compose.yml` file and add `platform: linux/amd64` to all connector services (e.g., `connector-export-file-stix`, `connector-import-document`, `xtm-composer`) to force Rosetta 2 emulation.
 
-**D. Boot the Core Stack:**
-To save memory and avoid timeout errors on heavy connectors, boot only the core databases and the main platform:
+**D. TWIP Project Credentials:**
+Create a `.env` file in the root directory of the `twip-nlp` folder and add your credentials:
+```env
+OPENCTI_URL="http://localhost:8080"
+OPENCTI_TOKEN="<insert-token-from-step-B>"
+BLOCKCYPHER_TOKEN="<optional-token>"
+SLACK_WEBHOOK_URL="<optional-webhook>"
+```
+
+---
+
+## Part 2: Instructions to Run
+
+To run the pipeline end-to-end, you need to spin up the background services and then start the Flask orchestrator.
+
+### Step 1: Start Background Services
+Open two separate terminal windows to start your database and your local LLM.
+
+**Terminal 1 (OpenCTI):**
 ```bash
+cd opencti-docker
 docker compose up -d rsa-key-generator redis elasticsearch minio rabbitmq xtm-composer opencti worker
 ```
-Wait 2-3 minutes for initialization, then access the dashboard at `http://localhost:8080`.
+*(Wait 2-3 minutes for initialization, then access the dashboard at `http://localhost:8080`)*
 
-## Running the Pipeline
+**Terminal 2 (Ollama):**
+```bash
+ollama run llama3
+```
 
-Start the Orchestrator, which initializes the machine learning models into memory and starts the Flask webhook listener on port `5001`.
+### Step 2: Start the Orchestrator
+In a new terminal window, activate your environment and start the Flask webhook listener on port `5001`.
 
 ```bash
 conda activate twip
 python pipeline/orchestrator.py
 ```
 
-### Interacting with the API
+### Step 3: Start the OpenCTI Pusher Daemon
+In another terminal, run the pusher script. This script will continuously watch the `/output` folder and automatically ingest newly generated STIX bundles into OpenCTI.
 
-**1. Automated Batch Ingestion (End-to-End Test):**
-To simulate a live data feed from I2P forums, you can use the included mock crawler. Ensure your mock dataset is saved at `input/all_posts.json` and run:
+```bash
+conda activate twip
+python pipeline/opencti_pusher.py
+```
 
+### Step 4: Ingest Data
+
+**Option A: Automated Batch Ingestion (End-to-End Test)**
+To simulate a live data feed from I2P forums, ensure your mock dataset is saved at `input/all_posts.json` and run the mock crawler in a new terminal:
 ```bash
 conda activate twip
 python mock_crawler.py
 ```
-*This script loops through the JSON array, posts each entry to the webhook at a safe interval, and generates corresponding STIX 2.1 bundles in the `/output` directory.*
 
-**2. Manual Ingestion (Single Post):**
-You can also push data to the `/ingest` endpoint manually via a `POST` request.
-
+**Option B: Manual Ingestion (Single Post)**
+You can push data to the `/ingest` endpoint manually via a `POST` request.
 ```bash
 curl -X POST http://localhost:5001/ingest \
 -H "Content-Type: application/json" \
@@ -155,36 +177,7 @@ curl -X POST http://localhost:5001/ingest \
 }'
 ```
 
-**Check Status:**
-Verify the pipeline's operational metrics via a GET request in your browser or terminal.
-```bash
-curl http://localhost:5001/status
-```
-
-### Pushing to OpenCTI
-Once STIX bundles are generated in the `/output` directory, you can push them directly to your local OpenCTI knowledge graph. 
-
-1. Ensure your OpenCTI Docker instance is running.
-2. Create a `.env` file in the root directory (`twip-nlp/.env`) and add your OpenCTI credentials (using the token extracted during setup):
-   ```env
-   OPENCTI_URL="http://localhost:8080"
-   OPENCTI_TOKEN="your-uuid-token-here"
-   ```
-3. Run the pusher script:
-   ```bash
-   python pipeline/opencti_pusher.py
-   ```
-*Note: Successfully ingested JSON files are automatically moved to `/output/ingested/` to prevent duplicate uploads during subsequent runs.*
-
-## Module Breakdown
-
-* **`extractor.py`**: Handles static pattern matching. Uses comprehensive regex to catch modern crypto wallets (P2PKH, P2SH, Bech32, Monero subaddresses) and secure communication channels.
-* **`classifier.py`**: Uses `classy-classification` combined with Hugging Face zero-shot models to semantically map unstructured text to predefined threat dictionaries.
-* **`llm_analyzer.py`**: Interfaces strictly with Ollama's JSON-mode API to guarantee machine-readable sentiment, urgency scoring, and trend detection without hallucination.
-* **`alias_resolver.py`**: An algorithmic matching engine that calculates confidence scores to link separate profiles sharing hard cryptographic identifiers. 
-* **`stix_mapper.py`**: Wraps the final intelligence dictionary into OpenCTI-compatible `Report`, `ThreatActor`, and `Indicator` objects, strictly adhering to STIX 2.1 relationship ontology (e.g., `Indicator -> indicates -> ThreatActor`).
-* **`opencti_pusher.py`**: The delivery mechanism. Uses the `pycti` client to read generated STIX bundles, parse them from JSON, and ingest them directly into the OpenCTI graph database. Safely archives files post-ingestion.
-* **`orchestrator.py`**: The central nervous system. It manages model loading, payload deduplication (via SHA-256 hashing), and directs the data flow through the pipeline.
+---
 
 ## Product Vision & Hackathon Roadmap
 Beyond the core extraction and mapping pipeline, TWIP aims to implement several advanced capabilities to provide immediate value to Law Enforcement Agencies (LEAs):

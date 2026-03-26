@@ -26,7 +26,45 @@ class DarkWebExtractor:
         except OSError:
             print("Error: Transformer model not found. Run: python -m spacy download en_core_web_trf")
             self.nlp = spacy.blank("en")
+    def extract_cves(self, text: str) -> list:
+        """Extracts standard CVE vulnerability identifiers."""
+        # Matches formats like CVE-2024-1234 or CVE-2023-123456
+        cve_pattern = r"(?i)CVE-\d{4}-\d{4,7}"
+        return list(set(re.findall(cve_pattern, text.upper())))
 
+    def extract_tactics_and_malware(self, text: str) -> dict:
+        """Quick keyword matching for common tools and malware families."""
+        text_lower = text.lower()
+        
+        known_tools = ["cobalt strike", "mimikatz", "metasploit", "flipper zero", "sqlmap", "burp suite"]
+        known_malware = ["lockbit", "ryuk", "emotet", "mirai", "qakbot", "cobaltstrike", "pegasus"]
+        
+        return {
+            "tools": [tool for tool in known_tools if tool in text_lower],
+            "malware": [mal for mal in known_malware if mal in text_lower]
+        }
+
+    def process_text(self, text: str) -> dict:
+        """Entry point to extract all target data and enrich BTC wallets."""
+        wallets = self.extract_crypto_wallets(text)
+        entities = self.extract_entities(text)
+        
+        # Pull out Geographic Locations from the spaCy entities
+        locations = list(set([ent["text"] for ent in entities if ent["label"] == "GPE"]))
+        
+        enriched_btc_data = []
+        for btc_addr in wallets.get("bitcoin", []):
+            print(f"[*] Enriching BTC Wallet: {btc_addr}...")
+            enriched_btc_data.append(self.enrich_bitcoin_wallet(btc_addr))
+            
+        return {
+            "wallets": wallets, 
+            "entities": entities,
+            "locations": locations, # Added Locations
+            "cves": self.extract_cves(text), # Added CVEs
+            "arsenal": self.extract_tactics_and_malware(text), # Added Malware/Tools
+            "enriched_wallets": enriched_btc_data
+        }
     def enrich_bitcoin_wallet(self, wallet_address: str) -> dict:
         """Queries BlockCypher API for live Bitcoin wallet statistics using your token."""
         if not BLOCKCYPHER_TOKEN:

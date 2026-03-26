@@ -1,4 +1,4 @@
-from stix2 import Bundle, Report, ThreatActor, Indicator, Relationship, Identity
+from stix2 import Bundle, Report, ThreatActor, Indicator, Relationship, Identity, Vulnerability, Malware, Tool, Location
 from datetime import datetime
 from typing import Dict, Any
 
@@ -77,7 +77,7 @@ class STIXMapper:
                     indicator_type="compromised-infrastructure",
                     desc=f"{currency.capitalize()} Wallet Address"
                 )
-                
+              
         # Map Tox IDs
         for tox_id in iocs.get("communications", {}).get("tox_id", []):
             _create_indicator(
@@ -85,6 +85,39 @@ class STIXMapper:
                 indicator_type="anonymization",
                 desc="Tox Secure Communication ID"
             )
+
+        # --- NEW: MAP VULNERABILITIES, MALWARE, TOOLS, AND LOCATIONS ---
+        
+        # Map Vulnerabilities (CVEs)
+        for cve in iocs.get("cves", []):
+            vuln = Vulnerability(name=cve, description=f"Identified zero-day or exploit discussion for {cve}.")
+            stix_objects.append(vuln)
+            stix_objects.append(Relationship(source_ref=actor.id, target_ref=vuln.id, relationship_type="targets"))
+
+        # Map Malware
+        for malware_name in iocs.get("arsenal", {}).get("malware", []):
+            mal = Malware(
+                name=malware_name.capitalize(), 
+                is_family=True,
+                description=f"Malware family referenced in intercepted comms."
+            )
+            stix_objects.append(mal)
+            stix_objects.append(Relationship(source_ref=actor.id, target_ref=mal.id, relationship_type="uses"))
+
+        # Map Tools
+        for tool_name in iocs.get("arsenal", {}).get("tools", []):
+            tool = Tool(
+                name=tool_name.title(), 
+                description="Exploitation or administration tool."
+            )
+            stix_objects.append(tool)
+            stix_objects.append(Relationship(source_ref=actor.id, target_ref=tool.id, relationship_type="uses"))
+
+        # Map Locations
+        for loc_name in iocs.get("locations", []):
+            loc = Location(name=loc_name)
+            stix_objects.append(loc)
+            stix_objects.append(Relationship(source_ref=actor.id, target_ref=loc.id, relationship_type="located-at"))
 
         # 3. Create the Intelligence Report Wrapper
         threat_type = classification.get("top_category", "unknown")
@@ -105,21 +138,25 @@ class STIXMapper:
         return bundle.serialize(indent=4)
 
 if __name__ == "__main__":
-    # Local testing to ensure Aliases are mapped to STIX JSON correctly
+    # Local testing to ensure Aliases and new entities are mapped to STIX JSON correctly
     dummy_payload = {
         "metadata": {
             "source_url": "http://waycuw2c27ruakfblkf5tcegwmt3ot445dlfoypil6bzmm4yxg7a.b32.i2p/thread/104",
             "timestamp": "2026-03-23T10:00:00Z",
             "author": "ShadowBroker"
         },
-        "threat_classification": {"top_category": "drug_sales"},
+        "threat_classification": {"top_category": "weapon_sales"},
         "indicators_of_compromise": {
             "wallets": {"bitcoin": ["bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"]},
-            "communications": {"tox_id": ["42E9CA1A838AB6CA8E825A7C48B90BAFE1E22B9FA467A7AD4BA2821F1344803BD71BCB00A535"]}
+            "communications": {"tox_id": ["42E9CA1A838AB6CA8E825A7C48B90BAFE1E22B9FA467A7AD4BA2821F1344803BD71BCB00A535"]},
+            "cves": ["CVE-2024-3432"],
+            "arsenal": {
+                "malware": ["lockbit"],
+                "tools": ["cobalt strike"]
+            },
+            "locations": ["London"]
         },
-        "intelligence_assessment": {"urgency_score": 7},
-        
-        # Simulate data injected by AliasResolver
+        "intelligence_assessment": {"urgency_score": 9},
         "alias_resolution": {
             "alias_detected": True,
             "primary_actor": "DarkVendor99",
