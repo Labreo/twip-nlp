@@ -11,3 +11,5 @@ pycti
 python-dotenv
 streamlit
 bs4
+py7zr 
+beautifulsoup4

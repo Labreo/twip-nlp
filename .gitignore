@@ -4,3 +4,6 @@ output/*.json
 .env
 output/ingested/
 .DS_Store
+input/
+*.deflate
+.txt
