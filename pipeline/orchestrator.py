@@ -12,10 +12,6 @@ from extractor import DarkWebExtractor
 from llm_analyzer import ThreatLLMAnalyzer
 from alias_resolver import AliasResolver
 
-# NOTE: ThreatClassifier intentionally removed — category comes from
-# pre_analysis_metadata injected by auto_ingester.py, avoiding a
-# PyTorch memory clash between two transformer models in the same process.
-
 load_dotenv()
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 
@@ -35,17 +31,6 @@ seen_hashes = set()
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_DIR = os.path.join(BASE_DIR, 'output')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-# Maps auto_ingester categories → STIX/pipeline categories
-CATEGORY_MAP = {
-    "weapons":        "weapons",
-    "drugs":          "drug_sales",
-    "cybercrime":     "hacking_services",
-    "financial_fraud":"financial_fraud",
-    "exploitation":   "hacking_services",
-    "csam_references":"csam_references",
-    "crypto_only":    "financial_fraud",  # crypto-only defaults to fraud
-}
 
 # ==========================================
 # SLACK ALERT LOGIC
@@ -113,23 +98,69 @@ def ingest_data():
         # --- STAGE 1: Extract IOCs (always runs, fast regex) ---
         extracted_data = extractor.process_text(content)
 
-        # --- STAGE 2: Category from pre_analysis_metadata ---
-        # auto_ingester.py already classified this via the scored keyword filter.
-        # Using that ground truth avoids loading a second transformer model,
-        # which caused PyTorch memory clashes on Apple Silicon.
+        # --- STAGE 2: Hybrid Dynamic Threat Mapping ---
         pre_metadata = data.get("pre_analysis_metadata", {})
         raw_category = pre_metadata.get("primary_category", "unknown")
-        top_category = CATEGORY_MAP.get(raw_category, "benign")
+
+        # 1. Trust the crawler for hard Tier-1 keyword matches
+        category_mapping = {
+            "weapons": "weapons",
+            "drugs": "drug_sales",
+            "cybercrime": "hacking_services",
+            "financial_fraud": "financial_fraud",
+            "exploitation": "hacking_services",
+            "csam_references": "csam_references"
+        }
+
+        if raw_category in category_mapping:
+            top_category = category_mapping[raw_category]
+            confidence = 0.95
+            method = "crawler_ground_truth"
+        else:
+            # 2. DYNAMIC MAPPING: For 'crypto_only' or unknown posts, ask Llama 3
+            print("[*] Ambiguous context detected. Asking Llama 3 to dynamically map category...")
+            prompt = (
+                "You are a threat intelligence classifier. Read the following intercepted dark web text and "
+                "classify it into exactly ONE of these categories: "
+                "[weapons, drug_sales, hacking_services, financial_fraud, csam_references, benign]. "
+                "Reply with ONLY the exact category name and absolutely nothing else.\n\n"
+                f"TEXT: {content[:1000]}"
+            )
+            try:
+                # Fast ping to local Ollama API for categorization
+                ollama_res = requests.post("http://localhost:11434/api/generate", json={
+                    "model": "llama3",
+                    "prompt": prompt,
+                    "stream": False
+                }, timeout=15)
+                
+                llm_reply = ollama_res.json().get("response", "").strip().lower()
+
+                # Safely extract the exact category from Llama's response
+                assigned_cat = "benign" # Default fallback
+                for valid_cat in ["weapons", "drug_sales", "hacking_services", "financial_fraud", "csam_references", "benign"]:
+                    if valid_cat in llm_reply:
+                        assigned_cat = valid_cat
+                        break
+
+                top_category = assigned_cat
+                confidence = 0.85
+                method = "dynamic_llama3_routing"
+                print(f"  ↳ Llama 3 dynamically mapped to: {top_category.upper()}")
+                
+            except Exception as e:
+                print(f"  ↳ Llama 3 dynamic mapping failed: {e}. Defaulting to financial_fraud.")
+                top_category = "financial_fraud"
+                confidence = 0.50
+                method = "fallback"
 
         classification = {
             "top_category": top_category,
-            "confidence": 0.99,  # pre-filter is high-precision by design
-            "method": "heuristic_pre_filter"
+            "confidence": confidence,
+            "method": method
         }
 
         # --- STAGE 3: Gate Ollama ---
-        # If it passed the pre-filter, it's almost certainly a threat.
-        # Only skip Ollama for the rare benign fallback.
         llm_assessment = {
             "urgency_score": 0,
             "sentiment": "neutral",
@@ -144,7 +175,7 @@ def ingest_data():
             trends = llm_analyzer.detect_trends(content)
             ollama_ran = True
         else:
-            print(f"[~] Ollama skipped — benign fallback")
+            print(f"[~] Ollama skipped — benign dynamic mapping")
 
         # --- STAGE 4: Alias Resolution ---
         alias_data = alias_resolver.process_and_link(author, extracted_data)
@@ -218,14 +249,14 @@ def get_status():
         },
         "modules": {
             "extractor":      "✅ online",
-            "classifier":     "✅ online (heuristic bypass — memory optimized)",
+            "classifier":     "✅ online (Hybrid Llama 3 Routing)",
             "llm_analyzer":   "✅ online (gated)",
             "alias_resolver": "✅ online",
             "stix_mapper":    "✅ online"
         },
         "llm_gate": {
             "skip_categories": ["benign"],
-            "description": "Ollama runs on all pre-filter confirmed threats"
+            "description": "Ollama scores urgency on dynamically mapped threats"
         },
         "network": "I2P",
         "llm_backend": "Ollama (local — zero cloud egress)"
