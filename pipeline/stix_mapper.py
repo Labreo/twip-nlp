@@ -1,3 +1,5 @@
+import uuid
+from urllib.parse import urlparse
 from stix2 import Bundle, Report, ThreatActor, Indicator, Relationship, Identity, Vulnerability, Malware, Tool, Location
 from datetime import datetime
 from typing import Dict, Any
@@ -16,32 +18,45 @@ class STIXMapper:
         )
 
     def generate_bundle(self, enriched_data: Dict[str, Any]) -> str:
-        """
-        Takes the output from the Orchestrator and generates a STIX bundle.
-        """
+        """Takes the output from the Orchestrator and generates a STIX bundle."""
         stix_objects = [self.twip_identity]
         metadata = enriched_data.get("metadata", {})
         iocs = enriched_data.get("indicators_of_compromise", {})
         classification = enriched_data.get("threat_classification", {})
         
-        # Base scraped name
-        author_name = metadata.get("author", "Unknown Actor")
+        author_name = metadata.get("author", "Unknown_I2P_Actor")
         source_url = metadata.get("source_url", "Unknown URL")
 
-        # --- NEW: Extract Alias Resolution Data ---
+        # --- NEW: Deterministic Actor ID Generation ---
+        # If the author is unknown, use the site's domain as their name
+        if author_name in ["Unknown_I2P_Actor", "anonymous", "Unknown Actor"]:
+            domain = urlparse(source_url).netloc if source_url != "Unknown URL" else "unknown_domain"
+            actor_name = f"Unknown Actor ({domain})"
+        else:
+            actor_name = author_name
+
         alias_data = enriched_data.get("alias_resolution", {})
         is_alias = alias_data.get("alias_detected", False)
-        primary_actor_name = alias_data.get("primary_actor", author_name)
-        known_aliases = alias_data.get("aliases", [])
+        
+        # Override with primary alias if found
+        primary_actor_name = alias_data.get("primary_actor", actor_name)
+        if primary_actor_name in ["Unknown_I2P_Actor", "anonymous", "Unknown Actor"]:
+            domain = urlparse(source_url).netloc if source_url != "Unknown URL" else "unknown_domain"
+            primary_actor_name = f"Unknown Actor ({domain})"
 
-        # Ensure the current scraped name is added to the alias list if it differs from the primary
-        if is_alias and author_name not in known_aliases and author_name != primary_actor_name:
-            known_aliases.append(author_name)
+        known_aliases = alias_data.get("aliases", [])
+        if is_alias and actor_name not in known_aliases and actor_name != primary_actor_name:
+            known_aliases.append(actor_name)
+
+        # Generate a deterministic UUIDv5 based on the primary actor name
+        # This guarantees OpenCTI merges actors with the exact same name
+        deterministic_actor_id = f"threat-actor--{uuid.uuid5(uuid.NAMESPACE_URL, primary_actor_name)}"
 
         # 1. Create the Threat Actor
         actor = ThreatActor(
-            name=primary_actor_name, # Group under the master name
-            aliases=known_aliases,   # Inject all known alter-egos for OpenCTI
+            id=deterministic_actor_id,
+            name=primary_actor_name,
+            aliases=known_aliases,
             threat_actor_types=["criminal-enterprise" if classification.get("top_category") != "benign" else "unknown"],
             description=f"Automated extraction from I2P hidden service: {source_url}"
         )
@@ -50,7 +65,6 @@ class STIXMapper:
         # 2. Extract Indicators (Wallets, Comms, etc.)
         indicator_objects = []
         
-        # Helper to create indicators
         def _create_indicator(pattern: str, indicator_type: str, desc: str):
             ind = Indicator(
                 pattern=pattern,
@@ -61,8 +75,6 @@ class STIXMapper:
             )
             stix_objects.append(ind)
             indicator_objects.append(ind)
-            
-            # STIX 2.1 Standard: Indicator -> indicates -> Threat Actor
             stix_objects.append(Relationship(
                 source_ref=ind.id,
                 target_ref=actor.id,
@@ -86,8 +98,6 @@ class STIXMapper:
                 desc="Tox Secure Communication ID"
             )
 
-        # --- NEW: MAP VULNERABILITIES, MALWARE, TOOLS, AND LOCATIONS ---
-        
         # Map Vulnerabilities (CVEs)
         for cve in iocs.get("cves", []):
             vuln = Vulnerability(name=cve, description=f"Identified zero-day or exploit discussion for {cve}.")
@@ -114,10 +124,10 @@ class STIXMapper:
             stix_objects.append(Relationship(source_ref=actor.id, target_ref=tool.id, relationship_type="uses"))
 
         # Map Locations
-        for loc_name in iocs.get("locations", []):
+        '''for loc_name in iocs.get("locations", []):
             loc = Location(name=loc_name)
             stix_objects.append(loc)
-            stix_objects.append(Relationship(source_ref=actor.id, target_ref=loc.id, relationship_type="located-at"))
+            stix_objects.append(Relationship(source_ref=actor.id, target_ref=loc.id, relationship_type="located-at"))'''
 
         # 3. Create the Intelligence Report Wrapper
         threat_type = classification.get("top_category", "unknown")
@@ -136,35 +146,3 @@ class STIXMapper:
         # 4. Package everything into a STIX Bundle
         bundle = Bundle(objects=stix_objects)
         return bundle.serialize(indent=4)
-
-if __name__ == "__main__":
-    # Local testing to ensure Aliases and new entities are mapped to STIX JSON correctly
-    dummy_payload = {
-        "metadata": {
-            "source_url": "http://waycuw2c27ruakfblkf5tcegwmt3ot445dlfoypil6bzmm4yxg7a.b32.i2p/thread/104",
-            "timestamp": "2026-03-23T10:00:00Z",
-            "author": "ShadowBroker"
-        },
-        "threat_classification": {"top_category": "weapon_sales"},
-        "indicators_of_compromise": {
-            "wallets": {"bitcoin": ["bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"]},
-            "communications": {"tox_id": ["42E9CA1A838AB6CA8E825A7C48B90BAFE1E22B9FA467A7AD4BA2821F1344803BD71BCB00A535"]},
-            "cves": ["CVE-2024-3432"],
-            "arsenal": {
-                "malware": ["lockbit"],
-                "tools": ["cobalt strike"]
-            },
-            "locations": ["London"]
-        },
-        "intelligence_assessment": {"urgency_score": 9},
-        "alias_resolution": {
-            "alias_detected": True,
-            "primary_actor": "DarkVendor99",
-            "aliases": ["ShadowBroker"],
-            "confidence_score": 0.7
-        }
-    }
-    
-    mapper = STIXMapper()
-    stix_json = mapper.generate_bundle(dummy_payload)
-    print(stix_json)
