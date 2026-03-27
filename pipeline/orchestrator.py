@@ -131,7 +131,7 @@ def ingest_data():
         # --- STAGE 2: Classify Threat Domain (always runs, fast) ---
         classification = classifier.classify_text(content)
         top_category = classification.get("top_category")
-        confidence = classification.get("confidence", 0)
+        confidence = float(classification.get("confidence", 0.0))
 
         # --- STAGE 3: Gate Ollama ---
         # Only run the expensive LLM if classifier is confident
@@ -144,7 +144,7 @@ def ingest_data():
         }
         trends = []
 
-        if top_category != "benign" and confidence >= 0.45:
+        if top_category != "benign" and confidence >= 0.20:
             print(f"[*] Running LLM analysis for {top_category} "
                   f"(confidence: {confidence:.2f})...")
             llm_assessment = llm_analyzer.analyze_urgency(content)
@@ -158,7 +158,7 @@ def ingest_data():
 
         # --- STAGE 5: Slack Alert for High Urgency ---
         urgency_score = llm_assessment.get("urgency_score", 0)
-        if urgency_score >= 8 and top_category != "benign":
+        if urgency_score >= 7 and top_category != "benign":
             all_wallets = []
             for currency, addrs in extracted_data.get("wallets", {}).items():
                 all_wallets.extend(addrs)
@@ -184,7 +184,7 @@ def ingest_data():
                 **llm_assessment,
                 "trends": trends,
                 "ollama_ran": (
-                    top_category != "benign" and confidence >= 0.45
+                    top_category != "benign" and confidence >= 0.20
                 )
             },
             "alias_resolution": alias_data
@@ -208,7 +208,7 @@ def ingest_data():
             "file": filename,
             "category": top_category,
             "urgency": urgency_score,
-            "ollama_ran": top_category != "benign" and confidence >= 0.45
+            "ollama_ran": bool(top_category != "benign" and confidence >= 0.20)
         }), 201
 
     except Exception as e:
@@ -242,7 +242,7 @@ def get_status():
         },
         "llm_gate": {
             "skip_categories": ["benign"],
-            "min_confidence": 0.45,
+            "min_confidence": 0.20,
             "description": "Ollama only runs on confirmed threats"
         },
         "network": "I2P",

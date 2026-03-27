@@ -9,23 +9,17 @@ import re
 import time
 from bs4 import BeautifulSoup
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Try to use send2trash for safe OS-level trash bin deletion.
-# Falls back to permanent delete if not installed.
-# Install with: pip install send2trash
-# ─────────────────────────────────────────────────────────────────────────────
 try:
     from send2trash import send2trash
     HAS_SEND2TRASH = True
 except ImportError:
     HAS_SEND2TRASH = False
 
-# --- Configuration ---
 DOWNLOADS_DIR = os.path.join(os.path.expanduser('~'), 'Downloads')
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMP_EXTRACT_DIR = os.path.join(PROJECT_ROOT, "temp_ache_raw")
 INPUT_DIR = os.path.join(PROJECT_ROOT, "input")
-ARCHIVE_PASSWORD = "BITShack"
+ARCHIVE_PASSWORD = "bitsHACK"
 
 MIN_CHAR_LIMIT = 150
 MAX_CHAR_LIMIT = 5000
@@ -60,6 +54,11 @@ TIER1_KEYWORDS = {
         "btc tumbling", "coin mixer", "money laundering",
         "counterfeit bills", "fake id vendor"
     ],
+    "csam_references": [
+        "trading invite codes", "unreleased material mega", 
+        "premium private photo collections", "mega folder link", 
+        "exclusive private board", "underage content"
+    ],
     "exploitation": [
         "cve-202",
         "weaponized exploit", "proof of concept exploit",
@@ -81,23 +80,11 @@ TIER2_KEYWORDS = [
     "keylogger", "screencap", "bruteforce", "sqlmap"
 ]
 
-# ─────────────────────────────────────────────────────────────────────────────
-# HARD EXCLUSIONS — immediate reject
-# ─────────────────────────────────────────────────────────────────────────────
 EXCLUSION_PATTERNS = [
-    r"copyright \d{4}",
-    r"privacy policy",
-    r"terms of service",
-    r"all rights reserved",
-    r"cookie policy",
-    r"subscribe to our newsletter",
-    r"wordpress",
-    r"powered by",
-    r"404 not found",
-    r"403 forbidden",
-    r"access denied",
-    r"cloudflare",
-    r"please enable javascript",
+    r"copyright \d{4}", r"privacy policy", r"terms of service",
+    r"all rights reserved", r"cookie policy", r"subscribe to our newsletter",
+    r"wordpress", r"powered by", r"404 not found", r"403 forbidden",
+    r"access denied", r"cloudflare", r"please enable javascript",
     r"this site requires javascript",
 ]
 
@@ -111,7 +98,6 @@ MIN_THREAT_SCORE = 3
 
 os.makedirs(TEMP_EXTRACT_DIR, exist_ok=True)
 os.makedirs(INPUT_DIR, exist_ok=True)
-
 
 def score_content(text: str) -> tuple:
     text_lower = text.lower()
@@ -143,7 +129,6 @@ def score_content(text: str) -> tuple:
 
     return score, matched_tier1, matched_tier2
 
-
 def extract_metadata(text: str) -> dict:
     metadata = {}
     wallets = {}
@@ -167,18 +152,20 @@ def extract_metadata(text: str) -> dict:
 
     return metadata
 
-
 def find_latest_archive():
     list_of_files = glob.glob(os.path.join(DOWNLOADS_DIR, '*.7z'))
     if not list_of_files:
         return None
     return max(list_of_files, key=os.path.getctime)
 
-
 def extract_and_find_deflate(archive_path):
     print(f"[*] Extracting {os.path.basename(archive_path)}...")
-    with py7zr.SevenZipFile(archive_path, mode='r', password=ARCHIVE_PASSWORD) as z:
-        z.extractall(path=TEMP_EXTRACT_DIR)
+    try:
+        with py7zr.SevenZipFile(archive_path, mode='r', password=ARCHIVE_PASSWORD) as z:
+            z.extractall(path=TEMP_EXTRACT_DIR)
+    except py7zr.exceptions.Bad7zFile:
+        print("[-] Error: The 7z archive is corrupted or incomplete.")
+        return None
 
     for root, _, files in os.walk(TEMP_EXTRACT_DIR):
         for file in files:
@@ -186,9 +173,7 @@ def extract_and_find_deflate(archive_path):
                 return os.path.join(root, file)
     return None
 
-
 def move_archive_to_trash(archive_path: str):
-    """Move the processed archive to the OS trash bin."""
     filename = os.path.basename(archive_path)
     if HAS_SEND2TRASH:
         try:
@@ -199,11 +184,8 @@ def move_archive_to_trash(archive_path: str):
             os.remove(archive_path)
             print(f"[*] Deleted {filename} permanently.")
     else:
-        # Fallback — permanent delete with warning
         os.remove(archive_path)
         print(f"[*] Deleted {filename} permanently.")
-        print(f"    Tip: pip install send2trash for safer trash-bin deletion.")
-
 
 def process_data(deflate_path):
     print(f"[*] Found ACHE data: {os.path.basename(deflate_path)}")
@@ -227,10 +209,8 @@ def process_data(deflate_path):
 
     print(f"[*] Running scored threat filter (min score: {MIN_THREAT_SCORE})...")
 
-    for line in raw_text.split('\n'):
-        if not line.strip():
-            continue
-
+    # Memory optimization: Iterate over lines lazily rather than creating a massive list
+    for line in (line for line in raw_text.splitlines() if line.strip()):
         try:
             data = json.loads(line)
             url = data.get("url", "unknown_url")
@@ -322,9 +302,11 @@ def process_data(deflate_path):
         print(f"\n  Next step: python input_pusher.py")
         print(f"  Files sorted by score — highest threat posts processed first.")
 
-    shutil.rmtree(TEMP_EXTRACT_DIR)
-    print("\n[*] Cleaned up temporary extraction folders.")
-
+    try:
+        shutil.rmtree(TEMP_EXTRACT_DIR)
+        print("\n[*] Cleaned up temporary extraction folders.")
+    except Exception as e:
+        print(f"\n[-] Note: Could not clean temporary folder automatically: {e}")
 
 if __name__ == "__main__":
     latest_archive = find_latest_archive()
@@ -333,7 +315,6 @@ if __name__ == "__main__":
         deflate_file = extract_and_find_deflate(latest_archive)
         if deflate_file:
             process_data(deflate_file)
-            # Move archive to trash after successful processing
             move_archive_to_trash(latest_archive)
         else:
             print("[-] Could not find a .deflate file inside the archive.")
