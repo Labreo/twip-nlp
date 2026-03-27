@@ -13,3 +13,5 @@ streamlit
 bs4
 py7zr 
 beautifulsoup4
+send2trash
+requests
