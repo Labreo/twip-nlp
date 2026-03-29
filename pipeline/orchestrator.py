@@ -195,7 +195,8 @@ def ingest_data():
                 "source_url": url,
                 "timestamp": datetime.utcnow().isoformat() + "Z",
                 "content_hash": content_hash,
-                "author": author
+                "author": author,
+                "raw_text": content
             },
             "threat_classification": classification,
             "indicators_of_compromise": extracted_data,

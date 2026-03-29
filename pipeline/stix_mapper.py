@@ -26,8 +26,11 @@ class STIXMapper:
         
         author_name = metadata.get("author", "Unknown_I2P_Actor")
         source_url = metadata.get("source_url", "Unknown URL")
+        
+        # --- NEW: Extract Raw Text for the Report Description ---
+        raw_text = metadata.get("raw_text", "No raw text provided in payload.")
 
-        # --- NEW: Deterministic Actor ID Generation ---
+        # --- Deterministic Actor ID Generation ---
         # If the author is unknown, use the site's domain as their name
         if author_name in ["Unknown_I2P_Actor", "anonymous", "Unknown Actor"]:
             domain = urlparse(source_url).netloc if source_url != "Unknown URL" else "unknown_domain"
@@ -123,23 +126,27 @@ class STIXMapper:
             stix_objects.append(tool)
             stix_objects.append(Relationship(source_ref=actor.id, target_ref=tool.id, relationship_type="uses"))
 
-        # Map Locations
-        '''for loc_name in iocs.get("locations", []):
-            loc = Location(name=loc_name)
-            stix_objects.append(loc)
-            stix_objects.append(Relationship(source_ref=actor.id, target_ref=loc.id, relationship_type="located-at"))'''
-
         # 3. Create the Intelligence Report Wrapper
         threat_type = classification.get("top_category", "unknown")
         urgency = enriched_data.get("intelligence_assessment", {}).get("urgency_score", 0)
         
+        # --- NEW: Formatted Description ---
+        formatted_description = (
+            f"**Source:** {source_url}\n\n"
+            f"**AI Analysis:** Flagged as {threat_type.upper()} with an urgency score of {urgency}/10.\n\n"
+            f"---\n**RAW EXTRACTED TEXT:**\n\n> {raw_text}"
+        )
+
+        # --- NEW: Added Urgency Label ---
+        report_labels = [threat_type, "darkweb", "i2p", f"urgency:{urgency}"]
+
         report = Report(
             name=f"Automated Threat Flag: {threat_type.upper()} [Urgency: {urgency}/10]",
-            description=f"Scraped from {source_url}. Analysis flagged this as {threat_type}.",
+            description=formatted_description,
             published=datetime.utcnow(),
             object_refs=[obj.id for obj in stix_objects if obj.id != self.twip_identity.id],
             created_by_ref=self.twip_identity.id,
-            labels=[threat_type, "darkweb", "i2p"]
+            labels=report_labels
         )
         stix_objects.append(report)
 
