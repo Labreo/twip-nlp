@@ -54,7 +54,6 @@ def send_slack_alert(author: str, urgency: int, category: str,
             "fields": [
                 {"title": "Actor/Alias",       "value": author,               "short": True},
                 {"title": "Threat Category",   "value": category,             "short": True},
-                {"title": "Intercepted Comm",  "value": f"> {content[:200]}...","short": False},
                 {"title": "Extracted Wallets", "value": f"{ticks}\n{wallet_str}\n{ticks}", "short": False}
             ],
             "footer": "TWIP Automated OSINT Pipeline • Pushed to OpenCTI",
