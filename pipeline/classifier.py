@@ -81,7 +81,6 @@ class ThreatClassifier:
         }
 
 if __name__ == "__main__":
-    # Local testing block
     classifier = ThreatClassifier()
     
     sample_posts = [

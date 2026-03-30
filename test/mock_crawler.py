@@ -5,7 +5,7 @@ import os
 
 # Configuration
 ENDPOINT = "http://localhost:5001/ingest"
-FILE_PATH = os.path.join("input", "all_posts.json")
+FILE_PATH = os.path.join("test", "all_posts.json") #erika: edited folder name
 
 def push_mock_data():
     if not os.path.exists(FILE_PATH):
