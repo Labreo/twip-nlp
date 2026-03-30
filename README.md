@@ -4,10 +4,10 @@ This repository houses the Natural Language Processing (NLP) and Threat Detectio
 
 ## Architecture Overview
 
-The pipeline operates as a highly optimized, multi-stage machine learning architecture. It is separated into an automated Pre-Triage ingestion phase and a Deep Analysis Flask webhook API:
+The pipeline operates as a highly optimized, multi-stage machine learning architecture. It has been unified into a continuous, real-time intelligence feed via a single deployment script:
 
-1. **Automated Ingestion & Live Triage (`auto_ingester.py`):** Continuously watches the local `data/` folder for newly dropped `.deflate` ACHE crawler files, decodes Base64/deflate streams, enforces context-window length limits, and utilizes a **Scoring-Based Threat Filter** to isolate high-value posts (e.g., crypto wallets, weapon sales) from generic network noise. After successful processing, the source `.deflate` file is automatically deleted from the `data/` folder.
-2. **Input Pusher (`input_pusher.py`):** Reads every filtered JSON file from `/input`, sorts them by threat score (highest first), and posts them sequentially to the Flask orchestrator. Replaces the need to manually feed data after triage.
+1. **Automated Ingestion & Live Triage (`data_watcher.py` & `auto_ingester.py`):** The watcher continuously monitors the OS `Downloads/` folder for newly dropped `.deflate` ACHE crawler files, automatically moving them to the pipeline's `data/` folder. The ingester then decodes Base64/deflate streams, enforces context-window limits, and utilizes a **Scoring-Based Threat Filter** to isolate high-value posts from generic network noise. The source archive is safely trashed post-processing.
+2. **Input Pusher (`input_pusher.py`):** Operates as a background daemon reading every filtered JSON file from `/input`, sorting them by threat score (highest first), and posting them sequentially to the Flask orchestrator. 
 3. **Extraction (Regex & NER):** Pulls cryptocurrency wallets, secure communication IDs (Tox/Jabber), CVE references, and standard entities using a Transformer-based spaCy model (`en_core_web_trf`). *Note: Base64 PGP blocks are actively stripped prior to regex scanning to prevent false-positive cryptocurrency wallet generation.*
 4. **Hybrid Dynamic Threat Mapping (LLM Router):** To prevent PyTorch memory clashes between multiple local transformer models, the pipeline bypasses traditional NLP classifiers.
     * **Tier-1 Threats:** Hard signals (e.g., "fentanyl", "CVE") use the crawler's ground-truth metadata.
@@ -29,6 +29,7 @@ twip-nlp/
 │   └── ingested/            # Successfully pushed STIX bundles are archived here
 ├── pipeline/                # The core logic modules
 │   ├── __init__.py
+│   ├── data_watcher.py      # Daemon: Watches OS Downloads folder and moves archives to data/
 │   ├── auto_ingester.py     # Watches data/, decodes, scores & filters raw ACHE dumps
 │   ├── extractor.py         # Regex, NER, and PGP-stripping logic
 │   ├── stix_mapper.py       # Converts enriched data into strict STIX 2.1 bundles
@@ -39,10 +40,13 @@ twip-nlp/
 ├── test/                    # Contains mock data for offline demo resilience
 │   └── all_posts.json       # Simulated I2P data feed with interconnected threat actors
 ├── .env.sample              # Project environment sample
-├── input_pusher.py          # Pushes all files from /input to the orchestrator
+├── start_pipeline.sh        # "One-Click" deployment script to run all background daemons
+├── input_pusher.py          # Daemon: Pushes all files from /input to the orchestrator
 ├── mock_crawler.py          # Feeds test/all_posts.json into the pipeline for demo simulation
 ├── requirements.txt         # Project dependencies
 └── README.md                # Project documentation
+```
+
 ---
 
 ## Part 1: Prerequisites & Setup
@@ -51,20 +55,20 @@ This pipeline is optimized for local deployment with zero cloud egress. It has b
 
 ### 1. System Dependencies (Crucial)
 
-The `pycti` library requires a C-library to identify file types. Install `send2trash` to enable safe archive deletion to the OS trash bin after processing.
+The `pycti` library requires a C-library to identify file types. Install `send2trash` to enable safe archive deletion to the OS trash bin after processing. You also need `watchdog` for the directory monitoring.
 
 **macOS (Apple Silicon) / Linux:**
 
 ```bash
 brew install libmagic           # macOS
 sudo apt-get install libmagic1  # Ubuntu/Debian
-pip install send2trash
+pip install send2trash watchdog
 ```
 
 **Windows:**
 
 ```bash
-pip install python-magic-bin send2trash
+pip install python-magic-bin send2trash watchdog
 ```
 
 ### 2. Python Environment Setup
@@ -137,9 +141,9 @@ SLACK_WEBHOOK_URL="<optional-slack-webhook>"
 
 ## Part 2: Instructions to Run
 
-### Step 1: Start Background Services
+### Step 1: Start External Services
 
-Open two separate terminals.
+Open two separate terminals to host your dependencies.
 
 **Terminal 1 — OpenCTI:**
 
@@ -158,69 +162,36 @@ ollama run llama3
 
 *(Leave this running in the background)*
 
-### Step 2: Start the NLP Orchestrator & OpenCTI Pusher
+### Step 2: "One-Click" Pipeline Start
 
-**Terminal 3 — Flask API (port 5001):**
+Because TWIP is designed for continuous, zero-touch execution, you no longer need to spin up individual scripts manually.
 
-```bash
-conda activate twip
-python pipeline/orchestrator.py
-```
-
-**Terminal 4 — OpenCTI Pusher Daemon:**
+Open a terminal in your `twip-nlp` root directory, make the deployment script executable, and run it:
 
 ```bash
-conda activate twip
-python pipeline/opencti_pusher.py
+chmod +x start_pipeline.sh
+./start_pipeline.sh
 ```
 
-*This daemon watches `/output` every 10 seconds and automatically pushes new STIX bundles to OpenCTI.*
+**What this does:**
+1. Activates your Conda environment.
+2. Starts the `data_watcher` to monitor your OS `Downloads/` folder.
+3. Starts the `auto_ingester` to decode and filter data drops.
+4. Starts the Flask `orchestrator` API.
+5. Starts the `opencti_pusher` daemon to push STIX bundles to the dashboard.
+6. Starts the `input_pusher` daemon to feed the API.
 
-### Step 3: Live Data — Process a Real ACHE Crawler Dump
+Press `CTRL+C` at any time to gracefully terminate all background processes simultaneously.
 
-When the crawling team delivers a new password-protected `.7z` archive to your `Downloads/` folder:
+### Step 3: Processing Live Data
 
-**Step 3a — Triage and filter the raw dump:**
+With the pipeline running via `./start_pipeline.sh`, the process is now completely automated. 
 
-```bash
-conda activate twip
-python pipeline/auto_ingester.py
-```
+Whenever your crawler (or team member) drops a new `.deflate` or `.7z` file into your computer's `Downloads/` directory, the watcher will instantly detect it, move it to `/data`, unpack it, score it, filter the high-threat posts to `/input`, process them through the LLM via the API, and push the final STIX bundle to OpenCTI.
 
-This will extract and decode the archive, score every post, write high-signal files to `/input` sorted by threat score, and **move the source archive to your OS trash bin** automatically.
+### Step 4: Check Pipeline Status
 
-**Step 3b — Push filtered posts to the pipeline:**
-
-```bash
-conda activate twip
-python input_pusher.py
-```
-
-This reads every JSON file from `/input`, processes them highest-threat-score first, and sends each post to the Flask orchestrator. Terminal output shows category and urgency score per post in real time:
-
-```text
-[1/150] hit_cybercrime_009pts_...
-  -> ✓ stix_bundle_8c40f9... | cybercrime | urgency 8/10 | LLM✓
-[2/150] hit_financial_fraud_006pts_...
-  -> ✓ stix_bundle_3d9a87... | financial_fraud | urgency 3/10 | LLM✓
-[3/150] hit_drugs_003pts_...
-  -> ✓ stix_bundle_eb6d47... | benign | urgency 0/10 | LLM skipped
-```
-
-### Step 4: Demo / Offline Simulation
-
-To simulate a live I2P data feed without waiting for the crawler — ideal for presentations:
-
-```bash
-conda activate twip
-python mock_crawler.py
-```
-
-*Reads `test/all_posts.json` and feeds them directly into the orchestrator.*
-
-### Step 5: Check Pipeline Status
-
-At any time, verify operational metrics:
+At any time, verify operational metrics against the Flask API:
 
 ```bash
 curl http://localhost:5001/status
@@ -232,6 +203,8 @@ curl http://localhost:5001/status
 
 | Module | Role |
 | :--- | :--- |
+| `start_pipeline.sh`| Bash entrypoint. Initializes and manages all python daemons simultaneously. Safely traps and kills processes on exit. |
+| `data_watcher.py` | Monitors OS `Downloads/` folder and routes newly dropped ACHE files to `data/`. |
 | `auto_ingester.py` | Scores and filters raw ACHE crawler dumps. Moves source archive to trash on completion. |
 | `input_pusher.py` | Reads `/input` files sorted by threat score and POSTs each to the Flask orchestrator. |
 | `extractor.py` | Regex extraction of crypto wallets, Tox IDs, PGP keys, CVEs, and tools. Safely strips PGP blocks to prevent false-positive wallets. |
@@ -247,4 +220,4 @@ curl http://localhost:5001/status
 
 Beyond the core pipeline, TWIP aims to implement:
 
-* **Portable Deployment:** Single `docker-compose.yml` spinning up OpenCTI, the Flask pipeline, and the OpenCTI pusher daemon together for one-command LEA deployment.
+* **Full Dockerization:** While `./start_pipeline.sh` achieves a one-command startup for all local background tasks, the next step is combining this into a single `docker-compose.yml` that spins up OpenCTI, Ollama, and the TWIP python daemons in unified, portable containers for easier Law Enforcement Agency (LEA) distribution.
