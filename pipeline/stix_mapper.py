@@ -137,8 +137,8 @@ class STIXMapper:
             f"---\n**RAW EXTRACTED TEXT:**\n\n> {raw_text}"
         )
 
-        # --- NEW: Added Urgency Label ---
-        report_labels = [threat_type, "darkweb", "i2p", f"urgency:{urgency}"]
+        # --- UPDATED: Removed generic "i2p" and "darkweb" tags for cleaner OpenCTI clustering ---
+        report_labels = [threat_type, f"urgency:{urgency}"]
 
         report = Report(
             name=f"Automated Threat Flag: {threat_type.upper()} [Urgency: {urgency}/10]",
