@@ -12,7 +12,7 @@ import glob
 
 ENDPOINT = "http://localhost:5001/ingest"
 # Adjusting PROJECT_ROOT assuming this script is in the root directory
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) #erika: edited path.dirname
 INPUT_DIR = os.path.join(PROJECT_ROOT, "input")
 DELAY_SECONDS = 5  # i2P data is slow — give Ollama time to breathe
 
