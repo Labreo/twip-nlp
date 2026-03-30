@@ -1,28 +1,24 @@
 import os
 import glob
-import shutil
-import py7zr
 import zlib
 import json
 import base64
 import re
 import time
-from bs4 import BeautifulSoup
+import warnings
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
-try:
-    from send2trash import send2trash
-    HAS_SEND2TRASH = True
-except ImportError:
-    HAS_SEND2TRASH = False
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
-DOWNLOADS_DIR = os.path.join(os.path.expanduser('~'), 'Downloads')
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TEMP_EXTRACT_DIR = os.path.join(PROJECT_ROOT, "temp_ache_raw")
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 INPUT_DIR = os.path.join(PROJECT_ROOT, "input")
-ARCHIVE_PASSWORD = "bitsHACK"
 
 MIN_CHAR_LIMIT = 150
 MAX_CHAR_LIMIT = 5000
+MIN_THREAT_SCORE = 3
+POLL_INTERVAL = 5  # seconds between folder checks
+FILE_STABLE_WAIT = 2  # seconds to confirm file finished writing
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TIER 1 — HARD SIGNALS (each match = 3 points)
@@ -32,12 +28,12 @@ TIER1_KEYWORDS = {
         "fentanyl", "heroin", "methamphetamine", "mdma crystals",
         "cocaine hydrochloride", "pressed pills", "bulk mdma",
         "stealth shipping", "vacuum sealed drugs", "drug vendor",
-        "darknet market", "finalize early", "fe only"
+        "darknet market", "finalize early", "fe only", "bb forums", "breaking bad"
     ],
     "weapons": [
         "ghost gun", "untraceable firearm", "serialized removed",
         "full auto conversion", "suppressor for sale", "ak-47 parts kit",
-        "ar-15 lower", "illegal mags", "weapons vendor"
+        "ar-15 lower", "illegal mags", "weapons vendor", "3d printing", ".stl"
     ],
     "cybercrime": [
         "ransomware affiliate", "lockbit", "blackcat ransomware",
@@ -52,12 +48,12 @@ TIER1_KEYWORDS = {
         "money mule", "carding", "bank account logs",
         "western union exploit", "cashout method",
         "btc tumbling", "coin mixer", "money laundering",
-        "counterfeit bills", "fake id vendor"
+        "counterfeit bills", "fake id vendor", "boomer"
     ],
     "csam_references": [
-        "trading invite codes", "unreleased material mega", 
-        "premium private photo collections", "mega folder link", 
-        "exclusive private board", "underage content"
+        "trading invite codes", "unreleased material mega",
+        "premium private photo collections", "mega folder link",
+        "exclusive private board", "underage content", "loli", "shota", "cunny","pedo"
     ],
     "exploitation": [
         "cve-202",
@@ -81,11 +77,18 @@ TIER2_KEYWORDS = [
 ]
 
 EXCLUSION_PATTERNS = [
+    # General Web Noise
     r"copyright \d{4}", r"privacy policy", r"terms of service",
     r"all rights reserved", r"cookie policy", r"subscribe to our newsletter",
     r"wordpress", r"powered by", r"404 not found", r"403 forbidden",
-    r"access denied", r"cloudflare", r"please enable javascript",
-    r"this site requires javascript",
+    
+    # --- NEW: The CTF / Educational Kill Switch ---
+    r"writeup", r"hackthebox", r"tryhackme", r"capture the flag", r"ctf",
+    r"tutorial", r"course", r"training", r"walkthrough",
+    
+    # --- NEW: The Forum Admin Kill Switch ---
+    r"moderation requests", r"abuse reports", r"ban appeal", 
+    r"forum rules", r"contact the admin", r"post removed"
 ]
 
 CRYPTO_PATTERNS = {
@@ -94,10 +97,30 @@ CRYPTO_PATTERNS = {
     "ETH": r'\b(0x[a-fA-F0-9]{40})\b'
 }
 
-MIN_THREAT_SCORE = 3
-
-os.makedirs(TEMP_EXTRACT_DIR, exist_ok=True)
+os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(INPUT_DIR, exist_ok=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DECOMPRESSION — streaming, handles large and multi-stream zlib files
+# ─────────────────────────────────────────────────────────────────────────────
+def decompress_streaming(data: bytes) -> bytes:
+    if len(data) >= 2 and data[0] == 0x78:
+        d = zlib.decompressobj(zlib.MAX_WBITS)           # zlib header
+    elif data[:2] == b'\x1f\x8b':
+        d = zlib.decompressobj(zlib.MAX_WBITS | 16)      # gzip header
+    else:
+        d = zlib.decompressobj(-zlib.MAX_WBITS)          # raw deflate
+
+    chunks = []
+    chunk_size = 1024 * 1024  # 1 MB
+
+    for i in range(0, len(data), chunk_size):
+        chunks.append(d.decompress(data[i:i + chunk_size]))
+    chunks.append(d.flush())
+
+    return b''.join(chunks)
+
 
 def score_content(text: str) -> tuple:
     text_lower = text.lower()
@@ -120,7 +143,7 @@ def score_content(text: str) -> tuple:
             matched_tier2.append(keyword)
             score += 1
 
-    for coin, pattern in CRYPTO_PATTERNS.items():
+    for _, pattern in CRYPTO_PATTERNS.items():
         if re.search(pattern, text):
             score += 2
 
@@ -129,9 +152,11 @@ def score_content(text: str) -> tuple:
 
     return score, matched_tier1, matched_tier2
 
+
 def extract_metadata(text: str) -> dict:
     metadata = {}
     wallets = {}
+
     for coin, pattern in CRYPTO_PATTERNS.items():
         found = list(set(re.findall(pattern, text)))
         if found:
@@ -152,52 +177,68 @@ def extract_metadata(text: str) -> dict:
 
     return metadata
 
-def find_latest_archive():
-    list_of_files = glob.glob(os.path.join(DOWNLOADS_DIR, '*.7z'))
-    if not list_of_files:
-        return None
-    return max(list_of_files, key=os.path.getctime)
 
-def extract_and_find_deflate(archive_path):
-    print(f"[*] Extracting {os.path.basename(archive_path)}...")
-    try:
-        with py7zr.SevenZipFile(archive_path, mode='r', password=ARCHIVE_PASSWORD) as z:
-            z.extractall(path=TEMP_EXTRACT_DIR)
-    except py7zr.exceptions.Bad7zFile:
-        print("[-] Error: The 7z archive is corrupted or incomplete.")
-        return None
-
-    for root, _, files in os.walk(TEMP_EXTRACT_DIR):
-        for file in files:
-            if file.endswith('.deflate'):
-                return os.path.join(root, file)
-    return None
-
-def move_archive_to_trash(archive_path: str):
-    filename = os.path.basename(archive_path)
-    if HAS_SEND2TRASH:
+def parse_html_safe(html: str) -> str:
+    for parser in ('lxml', 'html.parser'):
         try:
-            send2trash(archive_path)
-            print(f"[*] Moved {filename} to trash bin.")
-        except Exception as e:
-            print(f"[-] Could not move to trash: {e}. Deleting permanently instead.")
-            os.remove(archive_path)
-            print(f"[*] Deleted {filename} permanently.")
-    else:
-        os.remove(archive_path)
-        print(f"[*] Deleted {filename} permanently.")
+            soup = BeautifulSoup(html, parser)
+            for tag in soup(["script", "style", "nav", "footer", "header"]):
+                tag.extract()
+            return re.sub(r'\s+', ' ', soup.get_text(separator=' ', strip=True))
+        except Exception:
+            continue
+    return ""
 
-def process_data(deflate_path):
+
+def delete_source_file(file_path: str):
+    filename = os.path.basename(file_path)
+    try:
+        os.remove(file_path)
+        print(f"[*] Deleted source file: {filename}")
+    except Exception as e:
+        print(f"[-] Could not delete source file {filename}: {e}")
+
+
+def find_deflate_files_in_data():
+    return sorted(
+        glob.glob(os.path.join(DATA_DIR, '*.deflate')),
+        key=os.path.getctime
+    )
+
+
+def is_file_stable(file_path: str, wait_seconds: int = FILE_STABLE_WAIT) -> bool:
+    """
+    Prevents processing files that are still being written.
+    """
+    try:
+        size1 = os.path.getsize(file_path)
+        time.sleep(wait_seconds)
+        size2 = os.path.getsize(file_path)
+        return size1 == size2 and size1 > 0
+    except Exception:
+        return False
+
+
+def process_data(deflate_path) -> bool:
     print(f"[*] Found ACHE data: {os.path.basename(deflate_path)}")
     print("[*] Unpacking binary and decoding Base64 in memory...")
 
-    with open(deflate_path, 'rb') as f:
-        compressed_data = f.read()
+    try:
+        with open(deflate_path, 'rb') as f:
+            compressed_data = f.read()
+    except Exception as e:
+        print(f"[-] Could not read file: {e}")
+        return False
 
     try:
-        raw_bytes = zlib.decompress(compressed_data, zlib.MAX_WBITS | 32)
-    except zlib.error:
-        raw_bytes = zlib.decompress(compressed_data, -15)
+        raw_bytes = decompress_streaming(compressed_data)
+        print(f"[*] Decompressed successfully ({len(raw_bytes):,} bytes)")
+    except zlib.error as e:
+        print(f"[-] ERROR: Could not decompress {os.path.basename(deflate_path)}: {e}")
+        print(f"    File size : {len(compressed_data):,} bytes")
+        print(f"    First 32B : {compressed_data[:32].hex()}")
+        print(f"    Skipping this file and continuing...\n")
+        return False
 
     raw_text = raw_bytes.decode('utf-8', errors='ignore')
 
@@ -209,7 +250,6 @@ def process_data(deflate_path):
 
     print(f"[*] Running scored threat filter (min score: {MIN_THREAT_SCORE})...")
 
-    # Memory optimization: Iterate over lines lazily rather than creating a massive list
     for line in (line for line in raw_text.splitlines() if line.strip()):
         try:
             data = json.loads(line)
@@ -220,13 +260,11 @@ def process_data(deflate_path):
                 continue
 
             html = base64.b64decode(b64_content).decode('utf-8', errors='ignore')
-            soup = BeautifulSoup(html, 'html.parser')
-            for tag in soup(["script", "style", "nav", "footer", "header"]):
-                tag.extract()
-            text_content = re.sub(
-                r'\s+', ' ',
-                soup.get_text(separator=' ', strip=True)
-            )
+            text_content = parse_html_safe(html)
+
+            if not text_content:
+                skipped_length += 1
+                continue
 
             if len(text_content) < MIN_CHAR_LIMIT:
                 skipped_length += 1
@@ -278,11 +316,14 @@ def process_data(deflate_path):
                 INPUT_DIR,
                 f"hit_{primary_category}_{score:03d}pts_{int(time.time())}_{hits}.json"
             )
+
             with open(out_file, 'w', encoding='utf-8') as out_f:
                 json.dump(payload, out_f, indent=4)
+
             hits += 1
 
-        except Exception:
+        except Exception as e:
+            print(f"[-] Skipping malformed line: {e}")
             continue
 
     print(f"\n{'='*55}")
@@ -302,21 +343,52 @@ def process_data(deflate_path):
         print(f"\n  Next step: python input_pusher.py")
         print(f"  Files sorted by score — highest threat posts processed first.")
 
-    try:
-        shutil.rmtree(TEMP_EXTRACT_DIR)
-        print("\n[*] Cleaned up temporary extraction folders.")
-    except Exception as e:
-        print(f"\n[-] Note: Could not clean temporary folder automatically: {e}")
+    return True
+
+
+def watch_data_folder():
+    print("=" * 60)
+    print(" TWIP AUTO INGESTER WATCH MODE")
+    print("=" * 60)
+    print(f"[*] Watching folder: {DATA_DIR}")
+    print(f"[*] Poll interval: {POLL_INTERVAL}s")
+    print(f"[*] Waiting {FILE_STABLE_WAIT}s to confirm file is fully written")
+    print("[*] Press Ctrl+C to stop.\n")
+
+    while True:
+        try:
+            deflate_files = find_deflate_files_in_data()
+
+            if deflate_files:
+                print(f"\n[*] Detected {len(deflate_files)} file(s) in data/")
+                for deflate_path in deflate_files:
+                    filename = os.path.basename(deflate_path)
+
+                    print(f"\n{'='*55}")
+                    print(f"  Checking: {filename}")
+                    print(f"{'='*55}")
+
+                    if not is_file_stable(deflate_path):
+                        print(f"[-] File still being written, skipping for now: {filename}")
+                        continue
+
+                    print(f"[*] File is stable. Processing: {filename}")
+                    success = process_data(deflate_path)
+
+                    if success:
+                        delete_source_file(deflate_path)
+                    else:
+                        print(f"[-] Processing failed, keeping file for retry: {filename}")
+
+            time.sleep(POLL_INTERVAL)
+
+        except KeyboardInterrupt:
+            print("\n[*] Watcher stopped by user.")
+            break
+        except Exception as e:
+            print(f"[-] Watch loop error: {e}")
+            time.sleep(POLL_INTERVAL)
+
 
 if __name__ == "__main__":
-    latest_archive = find_latest_archive()
-    if latest_archive:
-        print(f"[*] Found crawler drop: {latest_archive}")
-        deflate_file = extract_and_find_deflate(latest_archive)
-        if deflate_file:
-            process_data(deflate_file)
-            move_archive_to_trash(latest_archive)
-        else:
-            print("[-] Could not find a .deflate file inside the archive.")
-    else:
-        print("[-] No .7z archives found in Downloads folder.")
+    watch_data_folder()

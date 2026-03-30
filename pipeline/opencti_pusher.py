@@ -31,7 +31,7 @@ def push_stix_bundles(api_client, output_dir, ingested_dir):
                 stix_data = json.load(f) 
                 
             api_client.stix2.import_bundle(stix_data)
-            shutil.move(file_path, os.path.join(ingested_dir, filename))
+            shutil.move(file_path, os.path.join(ingested_dir, filename)) 
             print(f"  -> Success: Moved to archive.")
             
         except Exception as e:
